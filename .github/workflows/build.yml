@@ -45,7 +45,7 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Test-Path "assets/character.mp4")) {
-            Write-Error "assets/character.mp4 is not in the repo. Upload it with the GitHub web UI (it is gitignored), then re-run this workflow."
+            Write-Error "assets/character.mp4 is missing."
             exit 1
           }
           New-Item -ItemType Directory -Force -Path frontend/assets | Out-Null
@@ -61,7 +61,7 @@ jobs:
         run: |
           $missing = @("src-tauri/icons/icon.ico", "src-tauri/icons/icon.png") | Where-Object { -not (Test-Path $_) }
           if ($missing) {
-            Write-Error ("Missing icon files (gitignored; upload them with the GitHub web UI): " + ($missing -join ", "))
+            Write-Error ("Missing icon files: " + ($missing -join ", "))
             exit 1
           }
           cargo tauri build

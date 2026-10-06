@@ -2,14 +2,10 @@
 src-tauri/target/
 src-tauri/gen/
 
-# Generated at build time by scripts/process_video.bat or CI
-frontend/assets/character_transparent.webm
-
-# Binary assets — upload manually via GitHub web UI after pushing code
-assets/character.mp4
-assets/tray_icon.ico
-src-tauri/icons/icon.ico
-src-tauri/icons/icon.png
+# Generated at build time by scripts/process_video.bat or CI.
+# Keep the folder, ignore the converted video and any files dropped here by mistake.
+frontend/assets/*
+!frontend/assets/.gitkeep
 
 # macOS
 .DS_Store
