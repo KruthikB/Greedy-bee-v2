@@ -3,7 +3,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use windows::{
     core::{w, GUID, PCWSTR},
     Win32::{
-        Foundation::HWND,
+        Foundation::{HWND, LPARAM, LRESULT, WPARAM},
         System::{
             LibraryLoader::GetModuleHandleW,
             Power::{RegisterPowerSettingNotification, POWERBROADCAST_SETTING},
@@ -74,6 +74,15 @@ fn get_hwnd(window: &tauri::WebviewWindow) -> Option<HWND> {
     }
 }
 
+unsafe extern "system" fn monitor_wnd_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    DefWindowProcW(hwnd, msg, wparam, lparam)
+}
+
 /// Spawns a native OS thread with a message-only window that receives
 /// WM_WTSSESSION_CHANGE (lock/unlock) and WM_POWERBROADCAST (display off/on),
 /// then forwards them as PlatformEvents over the mpsc channel.
@@ -85,7 +94,7 @@ pub fn start_monitor(tx: UnboundedSender<PlatformEvent>) {
             let class_name = w!("GreedyBee_Monitor_v1");
 
             let wc = WNDCLASSW {
-                lpfnWndProc: Some(DefWindowProcW),
+                lpfnWndProc: Some(monitor_wnd_proc),
                 hInstance: hinstance.into(),
                 lpszClassName: class_name,
                 ..Default::default()
