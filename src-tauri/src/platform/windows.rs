@@ -6,20 +6,15 @@ use windows::{
         Foundation::HWND,
         System::{
             LibraryLoader::GetModuleHandleW,
-            Power::{
-                RegisterPowerSettingNotification, DEVICE_NOTIFY_WINDOW_HANDLE,
-                POWERBROADCAST_SETTING,
-            },
-            RemoteDesktop::{
-                WTSRegisterSessionNotification, NOTIFY_FOR_THIS_SESSION, WTS_SESSION_LOCK,
-                WTS_SESSION_UNLOCK,
-            },
+            Power::{RegisterPowerSettingNotification, POWERBROADCAST_SETTING},
+            RemoteDesktop::{NOTIFY_FOR_THIS_SESSION, WTSRegisterSessionNotification},
         },
         UI::WindowsAndMessaging::{
-            CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, GWLP_EXSTYLE,
+            CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, GWL_EXSTYLE,
             GetWindowLongPtrW, HWND_MESSAGE, MSG, PBT_POWERSETTINGCHANGE, RegisterClassW,
             SetWindowLongPtrW, WINDOW_EX_STYLE, WINDOW_STYLE, WNDCLASSW, WM_POWERBROADCAST,
             WM_WTSSESSION_CHANGE, WS_EX_LAYERED, WS_EX_TRANSPARENT,
+            DEVICE_NOTIFY_WINDOW_HANDLE, WTS_SESSION_LOCK, WTS_SESSION_UNLOCK,
         },
     },
 };
@@ -61,13 +56,13 @@ pub fn set_clickthrough(window: &tauri::WebviewWindow, enabled: bool) {
         None => return,
     };
     unsafe {
-        let current = GetWindowLongPtrW(hwnd, GWLP_EXSTYLE);
+        let current = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
         let new_style = if enabled {
             current | (WS_EX_LAYERED.0 | WS_EX_TRANSPARENT.0) as isize
         } else {
             (current | WS_EX_LAYERED.0 as isize) & !(WS_EX_TRANSPARENT.0 as isize)
         };
-        SetWindowLongPtrW(hwnd, GWLP_EXSTYLE, new_style);
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_style);
     }
 }
 
@@ -120,7 +115,7 @@ pub fn start_monitor(tx: UnboundedSender<PlatformEvent>) {
             let _ = RegisterPowerSettingNotification(
                 hwnd.into(),
                 &GUID_DISPLAY_STATE,
-                DEVICE_NOTIFY_WINDOW_HANDLE.0,
+                DEVICE_NOTIFY_WINDOW_HANDLE,
             );
 
             let mut msg = MSG::default();

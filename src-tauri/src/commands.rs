@@ -1,5 +1,5 @@
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{config, scheduler, AppState};
 
