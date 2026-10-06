@@ -30,10 +30,18 @@ body.hidden {
 }
 
 #character-video {
+  /* Kept off-screen. WebView2 will not paint a <video> on a transparent window. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+#character-canvas {
   height: 300px;
   width: auto;
-  object-fit: contain;
-  /* WebM VP9 alpha channel renders here — no green border, fully transparent bg */
+  display: block;
 }
 
 /* Button strip — full width, 70px tall, at very bottom */
