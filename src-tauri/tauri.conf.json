@@ -38,7 +38,7 @@
       "nsis": {
         "languages": ["English"],
         "displayLanguageSelector": false,
-        "installMode": "perUser"
+        "installMode": "currentUser"
       }
     }
   },
