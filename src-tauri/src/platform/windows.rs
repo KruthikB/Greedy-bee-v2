@@ -122,7 +122,7 @@ pub fn start_monitor(tx: UnboundedSender<PlatformEvent>) {
 
             // Register for monitor display state changes
             let _ = RegisterPowerSettingNotification(
-                hwnd.into(),
+                hwnd,
                 &GUID_DISPLAY_STATE,
                 DEVICE_NOTIFY_WINDOW_HANDLE,
             );
