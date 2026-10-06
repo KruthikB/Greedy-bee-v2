@@ -3,6 +3,8 @@ const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
 const video      = document.getElementById('character-video');
+const canvas     = document.getElementById('character-canvas');
+const ctx        = canvas.getContext('2d', { alpha: true });
 const strip      = document.getElementById('button-strip');
 const questionLbl = document.getElementById('question-label');
 const drinkNowLbl = document.getElementById('drink-now-label');
@@ -11,10 +13,30 @@ const noBtn      = document.getElementById('no-btn');
 const doneBtn    = document.getElementById('done-btn');
 
 let state = 'hidden'; // 'hidden' | 'playing' | 'asking' | 'drink-now'
+let paintFrame = 0;
+
+function drawCharacter() {
+  if (video.videoWidth && video.videoHeight) {
+    if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+    }
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(video, 0, 0);
+  }
+  if (!video.paused && !video.ended) {
+    paintFrame = requestAnimationFrame(drawCharacter);
+  }
+}
 
 async function init() {
   await listen('reminder-fire', () => showReminder());
+  video.addEventListener('play', () => {
+    cancelAnimationFrame(paintFrame);
+    drawCharacter();
+  });
   video.addEventListener('ended', onVideoEnded);
+  video.addEventListener('error', onVideoEnded);
   yesBtn.addEventListener('click', dismissOverlay);
   doneBtn.addEventListener('click', dismissOverlay);
   noBtn.addEventListener('click', onNo);
@@ -70,6 +92,8 @@ async function dismissOverlay() {
 
   state = 'hidden';
   strip.classList.remove('visible');
+  cancelAnimationFrame(paintFrame);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
   video.pause();
   video.currentTime = 0;
 
