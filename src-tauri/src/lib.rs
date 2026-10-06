@@ -73,6 +73,7 @@ pub fn run() {
                     .shadow(false)
                     .visible(false)
                     .drag_and_drop(false)
+                    .additional_browser_args("--disable-direct-composition-video-overlays")
                     .position(
                         work_x as f64 / scale,
                         (work_y + work_h as i32 - overlay_physical_h as i32) as f64 / scale,
