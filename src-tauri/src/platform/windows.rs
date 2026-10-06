@@ -90,7 +90,9 @@ pub fn start_monitor(tx: UnboundedSender<PlatformEvent>) {
     std::thread::Builder::new()
         .name("gb-platform-monitor".into())
         .spawn(move || unsafe {
-            let hinstance = GetModuleHandleW(PCWSTR::null()).unwrap();
+            let Ok(hinstance) = GetModuleHandleW(PCWSTR::null()) else {
+                return;
+            };
             let class_name = w!("GreedyBee_Monitor_v1");
 
             let wc = WNDCLASSW {
@@ -101,7 +103,7 @@ pub fn start_monitor(tx: UnboundedSender<PlatformEvent>) {
             };
             let _ = RegisterClassW(&wc);
 
-            let hwnd = CreateWindowExW(
+            let Ok(hwnd) = CreateWindowExW(
                 WINDOW_EX_STYLE::default(),
                 class_name,
                 PCWSTR::null(),
@@ -114,8 +116,9 @@ pub fn start_monitor(tx: UnboundedSender<PlatformEvent>) {
                 None,
                 hinstance,
                 None,
-            )
-            .unwrap();
+            ) else {
+                return;
+            };
 
             // Register for session lock/unlock events
             let _ = WTSRegisterSessionNotification(hwnd, NOTIFY_FOR_THIS_SESSION);
@@ -147,8 +150,11 @@ pub fn start_monitor(tx: UnboundedSender<PlatformEvent>) {
                         }
                     }
                     WM_POWERBROADCAST => {
-                        if msg.wParam.0 as u32 == PBT_POWERSETTINGCHANGE {
+                        if msg.wParam.0 as u32 == PBT_POWERSETTINGCHANGE && msg.lParam.0 != 0 {
                             let setting = &*(msg.lParam.0 as *const POWERBROADCAST_SETTING);
+                            if setting.DataLength == 0 {
+                                continue;
+                            }
                             match setting.Data[0] {
                                 0 => {
                                     let _ = tx.send(PlatformEvent::ScreenOff);
@@ -166,5 +172,20 @@ pub fn start_monitor(tx: UnboundedSender<PlatformEvent>) {
                 }
             }
         })
-        .expect("failed to spawn platform monitor thread");
+        .ok();
+}
+
+pub fn show_error(message: &str) {
+    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+
+    let text: Vec<u16> = message.encode_utf16().chain(std::iter::once(0)).collect();
+    let title: Vec<u16> = "Greedy Bee\0".encode_utf16().collect();
+    unsafe {
+        let _ = MessageBoxW(
+            HWND(std::ptr::null_mut()),
+            PCWSTR(text.as_ptr()),
+            PCWSTR(title.as_ptr()),
+            MB_OK | MB_ICONERROR,
+        );
+    }
 }

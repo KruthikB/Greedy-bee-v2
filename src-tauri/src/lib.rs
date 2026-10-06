@@ -1,5 +1,5 @@
 use std::sync::{Arc, Mutex};
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 pub mod commands;
 pub mod config;
@@ -16,6 +16,14 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .on_window_event(|window, event| {
+            if window.label() == "settings" {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .setup({
             let scheduler_state = scheduler_state.clone();
             move |app| {
@@ -37,16 +45,22 @@ pub fn run() {
                 // Build overlay window programmatically so we can use live screen geometry
                 #[cfg(target_os = "windows")]
                 {
-                    let (work_w, work_h, work_x, work_y) = platform::get_work_area();
-                    let scale = app
+                    let (mut work_w, work_h, work_x, work_y) = platform::get_work_area();
+                    if work_w == 0 {
+                        work_w = 1280;
+                    }
+                    let mut scale = app
                         .primary_monitor()
                         .ok()
                         .flatten()
                         .map(|m| m.scale_factor())
                         .unwrap_or(1.0);
+                    if !scale.is_finite() || scale < 0.5 {
+                        scale = 1.0;
+                    }
                     let overlay_physical_h = 370u32; // 300 video + 70 button strip
 
-                    WebviewWindowBuilder::new(
+                    if let Err(err) = WebviewWindowBuilder::new(
                         app,
                         "overlay",
                         WebviewUrl::App("overlay/index.html".into()),
@@ -58,6 +72,7 @@ pub fn run() {
                     .skip_taskbar(true)
                     .shadow(false)
                     .visible(false)
+                    .drag_and_drop(false)
                     .position(
                         work_x as f64 / scale,
                         (work_y + work_h as i32 - overlay_physical_h as i32) as f64 / scale,
@@ -66,11 +81,16 @@ pub fn run() {
                         work_w as f64 / scale,
                         overlay_physical_h as f64 / scale,
                     )
-                    .build()?;
+                    .build()
+                    {
+                        eprintln!("Greedy Bee: overlay window was not created: {err}");
+                    }
                 }
 
-                // Build system tray
-                tray::build_tray(app)?;
+                // Build system tray. A tray failure must not close the settings window.
+                if let Err(err) = tray::build_tray(app) {
+                    eprintln!("Greedy Bee: tray icon was not created: {err}");
+                }
 
                 // Register Ctrl+Shift+W global hotkey → toggle 1-hour pause
                 {
@@ -83,12 +103,16 @@ pub fn run() {
                     );
                     let state_ref = scheduler_state.clone();
                     let handle_ref = app.handle().clone();
-                    app.global_shortcut()
-                        .on_shortcut(shortcut, move |_app, _sc, event| {
+                    if let Err(err) = app.global_shortcut().on_shortcut(
+                        shortcut,
+                        move |_app, _sc, event| {
                             if event.state() == ShortcutState::Pressed {
                                 scheduler::toggle_pause_one_hour(&state_ref, &handle_ref);
                             }
-                        })?;
+                        },
+                    ) {
+                        eprintln!("Greedy Bee: global shortcut was not registered: {err}");
+                    }
                 }
 
                 // Start platform monitor (session lock / power events) — Windows only
@@ -120,6 +144,12 @@ pub fn run() {
                     scheduler::run_loop(state_sched, handle_sched).await;
                 });
 
+                if let Some(settings) = app.get_webview_window("settings") {
+                    let _ = settings.show();
+                    let _ = settings.unminimize();
+                    let _ = settings.set_focus();
+                }
+
                 Ok(())
             }
         })
@@ -134,5 +164,9 @@ pub fn run() {
             commands::quit_app,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Greedy Bee");
+        .unwrap_or_else(|err| {
+            eprintln!("error while running Greedy Bee: {err}");
+            #[cfg(target_os = "windows")]
+            platform::show_error(&format!("Greedy Bee failed to start:\n{err}"));
+        });
 }
