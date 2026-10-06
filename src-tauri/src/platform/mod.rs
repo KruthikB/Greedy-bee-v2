@@ -7,7 +7,7 @@ pub enum PlatformEvent {
 mod windows;
 
 #[cfg(target_os = "windows")]
-pub use windows::{get_work_area, set_clickthrough, start_monitor};
+pub use windows::{get_work_area, set_clickthrough, show_error, start_monitor};
 
 // Stubs for non-Windows (macOS/Linux) — extend later
 #[cfg(not(target_os = "windows"))]

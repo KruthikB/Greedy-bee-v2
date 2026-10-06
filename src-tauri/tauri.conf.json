@@ -23,7 +23,8 @@
         "resizable": false,
         "visible": true,
         "center": true,
-        "skipTaskbar": false
+        "skipTaskbar": false,
+        "dragDropEnabled": false
       }
     ]
   },

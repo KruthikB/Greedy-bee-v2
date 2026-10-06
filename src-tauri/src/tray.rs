@@ -40,8 +40,14 @@ pub fn build_tray(app: &tauri::App) -> tauri::Result<()> {
         &[&open, &sep1, &pause_menu, &resume, &sep2, &test, &sep3, &quit],
     )?;
 
+    let Some(icon) = app.default_window_icon() else {
+        eprintln!("Greedy Bee: no default window icon; tray was not created");
+        return Ok(());
+    };
+
     TrayIconBuilder::with_id("main_tray")
-        .icon(app.default_window_icon().unwrap().clone())
+        .icon(icon.clone())
+        .tooltip("Greedy Bee")
         .menu(&menu)
         .on_menu_event(handle_menu_event)
         .on_tray_icon_event(|tray, event| {
