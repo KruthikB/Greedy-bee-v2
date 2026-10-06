@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Greedy Bee",
+  "version": "1.0.0",
+  "identifier": "com.greedybee.app",
+  "build": {
+    "frontendDist": "../frontend"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "csp": "default-src 'self'; media-src 'self' blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+    },
+    "windows": [
+      {
+        "label": "settings",
+        "title": "Greedy Bee",
+        "url": "settings/index.html",
+        "width": 440,
+        "height": 560,
+        "minWidth": 440,
+        "minHeight": 560,
+        "resizable": false,
+        "visible": true,
+        "center": true,
+        "skipTaskbar": false
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "msi"],
+    "icon": [
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "windows": {
+      "nsis": {
+        "languages": ["English"],
+        "displayLanguageSelector": false,
+        "installMode": "perUser"
+      }
+    }
+  },
+  "plugins": {
+    "global-shortcut": {}
+  }
+}

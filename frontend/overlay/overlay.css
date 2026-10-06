@@ -1,0 +1,107 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: 'Segoe UI', Arial, sans-serif;
+  /* GPU-composited fade — immune to CPU load from video calls */
+  transition: opacity 300ms ease-in-out;
+  opacity: 1;
+}
+
+body.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Character video — positioned at bottom-left, 300px tall */
+#video-container {
+  position: absolute;
+  bottom: 70px;
+  left: 0;
+  width: auto;
+  height: 300px;
+}
+
+#character-video {
+  height: 300px;
+  width: auto;
+  object-fit: contain;
+  /* WebM VP9 alpha channel renders here — no green border, fully transparent bg */
+}
+
+/* Button strip — full width, 70px tall, at very bottom */
+#button-strip {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 70px;
+  display: none;
+  align-items: center;
+  padding: 0 24px;
+  gap: 12px;
+  background: transparent;
+}
+
+#button-strip.visible {
+  display: flex;
+}
+
+.spacer {
+  flex: 1;
+}
+
+#question-label {
+  color: white;
+  font-size: 16px;
+  font-weight: bold;
+  background: rgba(0, 0, 0, 0.67);
+  border-radius: 10px;
+  padding: 8px 16px;
+  white-space: nowrap;
+}
+
+#drink-now-label {
+  color: #00cfff;
+  font-size: 18px;
+  font-weight: bold;
+  background: rgba(0, 0, 0, 0.78);
+  border-radius: 10px;
+  border: 2px solid #00cfff;
+  padding: 8px 16px;
+  white-space: nowrap;
+  display: none;
+}
+
+.btn {
+  background: rgba(10, 10, 10, 0.78);
+  color: white;
+  border: 2px solid rgba(255, 255, 255, 0.63);
+  border-radius: 10px;
+  padding: 8px 22px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms, border-color 120ms;
+}
+
+.btn:hover {
+  background: rgba(60, 60, 60, 0.86);
+  border-color: white;
+}
+
+.btn:active {
+  background: rgba(100, 100, 100, 0.86);
+}
+
+#done-btn {
+  display: none;
+}

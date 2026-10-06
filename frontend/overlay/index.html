@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="overlay.css" />
+</head>
+<body class="hidden">
+
+  <!-- Character video — pre-processed WebM with alpha channel, GPU-decoded -->
+  <div id="video-container">
+    <video
+      id="character-video"
+      src="../assets/character_transparent.webm"
+      muted
+      playsinline
+      preload="auto"
+    ></video>
+  </div>
+
+  <!-- Button strip shown after video ends -->
+  <div id="button-strip">
+    <span id="question-label">💧  Did you remember to drink water?</span>
+    <span id="drink-now-label">💧  Drink Now!  Get up and drink a glass of water.</span>
+    <div class="spacer"></div>
+    <button class="btn" id="yes-btn">✅  Yes, I drank!</button>
+    <button class="btn" id="no-btn">❌  Not yet</button>
+    <button class="btn" id="done-btn">✅  Done!  I drank</button>
+  </div>
+
+  <script src="overlay.js"></script>
+</body>
+</html>

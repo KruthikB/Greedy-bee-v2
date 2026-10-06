@@ -1,0 +1,56 @@
+name: Build Greedy Bee v2
+
+# Triggers: push to main, or manually from the GitHub Actions tab
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      # ── 1. Checkout ────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Rust toolchain ──────────────────────────────────────────
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      # ── 3. Cache Rust build artifacts (makes 2nd+ builds fast) ────
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      # ── 4. Tauri CLI — pre-built binary, fast (~30s vs 15min) ─────
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install Tauri CLI
+        run: cargo binstall tauri-cli@^2 --no-confirm
+
+      # ── 5. Convert green-screen video → transparent WebM ──────────
+      #    ffmpeg is pre-installed on windows-latest runners
+      - name: Convert character video (green screen → VP9 alpha)
+        run: |
+          ffmpeg `
+            -i assets/character.mp4 `
+            -vf "chromakey=0x00b140:similarity=0.35:blend=0.15,format=yuva420p" `
+            -c:v libvpx-vp9 -b:v 0 -crf 30 -auto-alt-ref 0 -an `
+            frontend/assets/character_transparent.webm
+        shell: pwsh
+
+      # ── 6. Build the Tauri app ────────────────────────────────────
+      - name: Build Greedy Bee
+        run: cargo tauri build
+
+      # ── 7. Upload the installer as a downloadable artifact ────────
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: GreedyBee-v2-Windows-x64
+          path: src-tauri/target/release/bundle/nsis/*.exe
+          retention-days: 90
