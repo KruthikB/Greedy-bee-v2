@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::config::{self, Config, Reminder};
+use crate::config::{self, Config, Reminder, Schedule};
 
 pub struct SchedulerState {
     pub reminders: Vec<ReminderRuntime>,

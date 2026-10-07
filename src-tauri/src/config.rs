@@ -109,7 +109,7 @@ pub fn load(app: &tauri::AppHandle) -> Config {
 
     // Migrate legacy single-interval config.
     if let Ok(legacy) = serde_json::from_str::<LegacyConfig>(&raw) {
-        let mut cfg = Config {
+        let cfg = Config {
             version: 2,
             reminders: vec![default_water_reminder(legacy.reminder_interval_minutes)],
         };
