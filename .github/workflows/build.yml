@@ -56,7 +56,7 @@ jobs:
           ffmpeg `
             -y `
             -i assets/character.mp4 `
-            -vf "chromakey=0x00b140:similarity=0.35:blend=0.15,format=rgba,scale=-1:300,fps=12" `
+            -vf "chromakey=0x31A638:similarity=0.12:blend=0.08,format=rgba,scale=-1:300,fps=12" `
             -c:v libwebp -lossless 0 -compression_level 4 -q:v 55 -an `
             "$framesDir/frame_%04d.webp"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
