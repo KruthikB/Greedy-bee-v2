@@ -82,23 +82,25 @@ def crop_and_fit(img: Image.Image, target_h: int = 300) -> Image.Image:
     alpha = img.split()[-1]
     bbox = alpha.getbbox()
     if bbox is None:
-        return Image.new("RGBA", (1, target_h), (0, 0, 0, 0))
+        return Image.new("RGBA", (max(1, img.width), target_h), (0, 0, 0, 0))
     pad = 8
-    x0, y0, x1, y1 = bbox
-    x0 = max(0, x0 - pad)
+    _, y0, _, y1 = bbox          # vertical extent only — x is NOT cropped
     y0 = max(0, y0 - pad)
-    x1 = min(img.width, x1 + pad)
     y1 = min(img.height, y1 + pad)
-    cropped = img.crop((x0, y0, x1, y1))
-    cropped.thumbnail((target_h * 2, target_h), Image.Resampling.LANCZOS)
-    # Normalize canvas height so playback layout stays stable.
-    canvas = Image.new("RGBA", (max(1, cropped.width), target_h), (0, 0, 0, 0))
-    canvas.paste(cropped, (0, target_h - cropped.height), cropped)
-    # Resize can reintroduce a green halo — clean edges again at final size.
-    cleaned = _despill_edges(np.array(canvas))
-    # One final 1px peel at output resolution for any leftover fringe.
-    alpha = cleaned[:, :, 3] > 0
-    cleaned[ndimage.binary_dilation(~alpha, iterations=1) & alpha, 3] = 0
+
+    # Crop only vertically; keep the full video width so x-positions are preserved
+    # across all frames, making the character's lateral walk visible during playback.
+    v_cropped = img.crop((0, y0, img.width, y1))
+
+    crop_h = v_cropped.height
+    scale_factor = target_h / crop_h if crop_h > 0 else 1.0
+    new_w = max(1, round(v_cropped.width * scale_factor))
+    resized = v_cropped.resize((new_w, target_h), Image.Resampling.LANCZOS)
+
+    # Clean up any green fringe reintroduced by resize.
+    cleaned = _despill_edges(np.array(resized))
+    alpha_mask = cleaned[:, :, 3] > 0
+    cleaned[ndimage.binary_dilation(~alpha_mask, iterations=1) & alpha_mask, 3] = 0
     cleaned = _despill_edges(cleaned)
     return Image.fromarray(cleaned, "RGBA")
 
