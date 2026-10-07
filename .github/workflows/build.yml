@@ -40,20 +40,33 @@ jobs:
           if ($LASTEXITCODE -eq 3010) { exit 0 }
           exit $LASTEXITCODE
 
-      # ── 6. Convert green-screen video → transparent WebM ──────────
-      - name: Convert character video (green screen → VP9 alpha)
+      # ── 6. Convert green-screen video → transparent WebP frames ──
+      #    WebView2 will not paint alpha <video>/WebM on a transparent window.
+      #    PNG/WebP frames on a canvas do paint. Chromakey runs once here only.
+      - name: Convert character video (green screen → WebP frames)
         shell: pwsh
         run: |
           if (-not (Test-Path "assets/character.mp4")) {
             Write-Error "assets/character.mp4 is missing."
             exit 1
           }
-          New-Item -ItemType Directory -Force -Path frontend/assets | Out-Null
+          $framesDir = "frontend/assets/frames"
+          New-Item -ItemType Directory -Force -Path $framesDir | Out-Null
+          Remove-Item -Force "$framesDir/*" -ErrorAction SilentlyContinue
           ffmpeg `
+            -y `
             -i assets/character.mp4 `
-            -vf "chromakey=0x00b140:similarity=0.35:blend=0.15,format=yuva420p" `
-            -c:v libvpx-vp9 -b:v 0 -crf 30 -auto-alt-ref 0 -an `
-            frontend/assets/character_transparent.webm
+            -vf "chromakey=0x00b140:similarity=0.35:blend=0.15,format=rgba,scale=-1:300,fps=12" `
+            -c:v libwebp -lossless 0 -compression_level 4 -q:v 55 -an `
+            "$framesDir/frame_%04d.webp"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $count = (Get-ChildItem "$framesDir/frame_*.webp").Count
+          if ($count -lt 1) {
+            Write-Error "ffmpeg produced no character frames."
+            exit 1
+          }
+          @{ frameCount = $count; fps = 12 } | ConvertTo-Json | Set-Content -Encoding utf8 "$framesDir/manifest.json"
+          Write-Host "Generated $count character frames."
 
       # ── 7. Build the Tauri app ────────────────────────────────────
       - name: Build Greedy Bee

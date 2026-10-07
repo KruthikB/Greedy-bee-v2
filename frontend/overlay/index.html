@@ -7,19 +7,12 @@
 </head>
 <body class="hidden">
 
-  <!-- Character video — pre-processed WebM with alpha channel, GPU-decoded -->
+  <!-- Character frames are baked at build time (no runtime green-screen work). -->
   <div id="video-container">
-    <video
-      id="character-video"
-      src="../assets/character_transparent.webm"
-      muted
-      playsinline
-      preload="auto"
-    ></video>
     <canvas id="character-canvas"></canvas>
   </div>
 
-  <!-- Button strip shown after video ends -->
+  <!-- Button strip shown after animation ends -->
   <div id="button-strip">
     <span id="question-label">💧  Did you remember to drink water?</span>
     <span id="drink-now-label">💧  Drink Now!  Get up and drink a glass of water.</span>

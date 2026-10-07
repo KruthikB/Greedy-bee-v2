@@ -29,15 +29,6 @@ body.hidden {
   height: 300px;
 }
 
-#character-video {
-  /* Decode only. Visible <video> blanks transparent WebView2 windows. */
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
-}
-
 #character-canvas {
   height: 300px;
   width: auto;
