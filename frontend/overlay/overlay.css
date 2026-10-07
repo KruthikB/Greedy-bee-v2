@@ -30,10 +30,18 @@ body.hidden {
 }
 
 #character-video {
+  /* Decode only. Visible <video> blanks transparent WebView2 windows. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+#character-canvas {
   height: 300px;
   width: auto;
   display: block;
-  object-fit: contain;
 }
 
 /* Button strip — full width, 70px tall, at very bottom */
