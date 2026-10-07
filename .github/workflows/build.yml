@@ -6,6 +6,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# OIDC for Azure Artifact Signing + GitHub Releases
+permissions:
+  id-token: write
+  contents: write
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -33,15 +38,11 @@ jobs:
         run: cargo binstall tauri-cli@^2 --no-confirm
 
       # ── 5. Python deps for border flood-fill keyer ────────────────
-      #    ffmpeg chromakey was eating the face (green spill on skin).
-      #    Border-connected green removal keeps face/skin opaque.
       - name: Install Python frame-extraction deps
         shell: pwsh
         run: python -m pip install --quiet numpy pillow scipy opencv-python-headless
 
       # ── 6. Convert green-screen video → transparent WebP frames ──
-      #    WebView2 will not paint alpha <video>/WebM on a transparent window.
-      #    PNG/WebP frames on a canvas do paint. Chromakey runs once here only.
       - name: Convert character video (green screen → WebP frames)
         shell: pwsh
         run: |
@@ -65,21 +66,126 @@ jobs:
           }
           Write-Host "Generated $count character frames."
 
-      # ── 7. Build the Tauri app ────────────────────────────────────
+      # ── 7. Detect Azure Artifact Signing configuration ───────────
+      #    Unsigned EXEs are blocked by Chrome Safe Browsing and most
+      #    corporate filters. Signing requires an Azure Artifact Signing
+      #    (Trusted Signing) account + GitHub secrets/variables.
+      - name: Detect code signing config
+        id: signing
+        shell: pwsh
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ vars.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT: ${{ vars.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ vars.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
+        run: |
+          $required = @(
+            "AZURE_CLIENT_ID",
+            "AZURE_TENANT_ID",
+            "AZURE_SUBSCRIPTION_ID",
+            "AZURE_TRUSTED_SIGNING_ENDPOINT",
+            "AZURE_TRUSTED_SIGNING_ACCOUNT",
+            "AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE"
+          )
+          $missing = @($required | Where-Object { [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_)) })
+          if ($missing.Count -gt 0) {
+            Write-Host "::warning::Code signing not configured (missing: $($missing -join ', '))."
+            Write-Host "::warning::Chrome/corporate devices will keep blocking unsigned installers."
+            Write-Host "::warning::Set secrets AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_SUBSCRIPTION_ID"
+            Write-Host "::warning::and variables AZURE_TRUSTED_SIGNING_ENDPOINT / ACCOUNT / CERTIFICATE_PROFILE."
+            Write-Host "::warning::Guide: https://learn.microsoft.com/azure/trusted-signing/how-to-signing-integrations"
+            "enabled=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          } else {
+            Write-Host "Code signing configuration detected."
+            "enabled=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
+
+      - name: Azure login (OIDC)
+        if: steps.signing.outputs.enabled == 'true'
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install TrustedSigning PowerShell module
+        if: steps.signing.outputs.enabled == 'true'
+        shell: pwsh
+        run: Install-Module -Name TrustedSigning -Force -Scope CurrentUser -Repository PSGallery -AllowClobber
+
+      # ── 8. Build the Tauri app (signed when Azure is configured) ──
       - name: Build Greedy Bee
         shell: pwsh
+        env:
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ vars.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT: ${{ vars.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ vars.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
         run: |
           $missing = @("src-tauri/icons/icon.ico", "src-tauri/icons/icon.png") | Where-Object { -not (Test-Path $_) }
           if ($missing) {
             Write-Error ("Missing icon files: " + ($missing -join ", "))
             exit 1
           }
-          cargo tauri build
 
-      # ── 8. Upload the installer as a downloadable artifact ────────
-      - name: Upload installer
+          if ("${{ steps.signing.outputs.enabled }}" -eq "true") {
+            $signScript = Join-Path $env:GITHUB_WORKSPACE "scripts\sign-windows.ps1"
+            $signCmd = "pwsh -NoProfile -ExecutionPolicy Bypass -File `"$signScript`" %1"
+            $configPath = Join-Path $env:RUNNER_TEMP "tauri-sign.json"
+            @{ bundle = @{ windows = @{ signCommand = $signCmd } } } |
+              ConvertTo-Json -Depth 6 |
+              Set-Content -Path $configPath -Encoding utf8
+            Write-Host "Building with Authenticode signing via Artifact Signing..."
+            cargo tauri build --config $configPath
+          } else {
+            Write-Host "Building UNSIGNED (Chrome/corporate downloads will be blocked)."
+            cargo tauri build
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify Authenticode signatures
+        if: steps.signing.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          $files = @()
+          $files += Get-ChildItem "src-tauri/target/release/bundle/nsis/*.exe" -ErrorAction Stop
+          $files += Get-ChildItem "src-tauri/target/release/bundle/msi/*.msi" -ErrorAction SilentlyContinue
+          $files += Get-ChildItem "src-tauri/target/release/greedy-bee.exe" -ErrorAction SilentlyContinue
+          $failed = $false
+          foreach ($f in $files) {
+            $sig = Get-AuthenticodeSignature -FilePath $f.FullName
+            Write-Host "$($f.Name): Status=$($sig.Status) Signer=$($sig.SignerCertificate.Subject)"
+            if ($sig.Status -ne "Valid") {
+              Write-Error "Signature invalid for $($f.FullName): $($sig.StatusMessage)"
+              $failed = $true
+            }
+          }
+          if ($failed) { exit 1 }
+
+      # ── 9. Upload installers ─────────────────────────────────────
+      - name: Upload installer artifact
         uses: actions/upload-artifact@v7
         with:
           name: GreedyBee-v2-Windows-x64
-          path: src-tauri/target/release/bundle/nsis/*.exe
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/msi/*.msi
           retention-days: 90
+
+      # Prefer Releases over Actions artifact ZIPs for downloads.
+      # Only published when Authenticode signing is configured.
+      - name: Publish GitHub Release
+        if: steps.signing.outputs.enabled == 'true' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0+${{ github.run_number }}
+          name: Greedy Bee v1.0.0 (build ${{ github.run_number }})
+          body: |
+            Signed Windows installers for Greedy Bee.
+
+            Download the `.exe` (NSIS) or `.msi` below. These builds are Authenticode-signed with Azure Artifact Signing.
+          files: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/msi/*.msi
+          fail_on_unmatched_files: true
