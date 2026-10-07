@@ -32,6 +32,7 @@ body.hidden {
 #character-canvas {
   display: block;
   /* width and height are set by JS to the max frame dimensions */
+  filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.35));
 }
 
 /* Button strip — full width, 70px tall, at very bottom */
