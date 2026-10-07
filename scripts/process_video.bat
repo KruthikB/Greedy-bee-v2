@@ -40,11 +40,9 @@ del /q "%FRAMES%\frame_*.webp" 2>nul
 del /q "%MANIFEST%" 2>nul
 
 ffmpeg -y -i "%SOURCE%" ^
-  -vf "chromakey=0x31A638:similarity=0.12:blend=0.08,format=rgba,scale=-1:300,fps=12" ^
+  -vf "chromakey=0x31A638:similarity=0.06:blend=0.0,format=rgba,crop=iw*0.42:ih:iw*0.58:0,scale=-1:300,fps=12" ^
   -c:v libwebp ^
-  -lossless 0 ^
-  -compression_level 4 ^
-  -q:v 55 ^
+  -lossless 1 ^
   -an ^
   "%FRAMES%\frame_%%04d.webp"
 
