@@ -78,19 +78,12 @@ function playFrames() {
   // Use the widest frame so narrow entry-frames don't clip later ones.
   const maxW    = frames.reduce((m, f) => Math.max(m, f.naturalWidth), 0);
   const targetH = frames[0].naturalHeight;
-  const animMs  = frames.length * Math.max(16, Math.round(1000 / fps));
 
   canvas.width  = maxW;
   canvas.height = targetH;
   // Explicit inline styles — don't rely on `width: auto` in WebView2.
   canvas.style.width  = maxW   + 'px';
   canvas.style.height = targetH + 'px';
-
-  // Walk the container from off-screen to the landing spot over the animation duration.
-  container.style.left = `-${maxW + 20}px`;
-  container.getBoundingClientRect(); // force reflow so transition fires
-  container.style.transition = `left ${animMs}ms ease-out`;
-  container.style.left = '15%';
 
   const frameMs = Math.max(16, Math.round(1000 / fps));
   let index = 0;
@@ -123,10 +116,6 @@ async function init() {
 async function showReminder() {
   if (state !== 'hidden') return;
   state = 'playing';
-
-  // Park off-screen before body fades in so no positional flash occurs.
-  container.style.transition = 'none';
-  container.style.left = '-400px';
 
   strip.classList.remove('visible');
   questionLbl.style.display = 'block';
@@ -173,10 +162,6 @@ function onNo() {
 async function dismissOverlay() {
   document.body.classList.add('hidden');
   await new Promise((r) => setTimeout(r, 350));
-
-  // Cancel transition and reset position so next walk-in starts clean.
-  container.style.transition = 'none';
-  container.style.left = '';
 
   clearTimers();
   state = 'hidden';
