@@ -58,7 +58,10 @@ pub fn run() {
                     if !scale.is_finite() || scale < 0.5 {
                         scale = 1.0;
                     }
-                    let overlay_physical_h = 370u32; // 300 video + 70 button strip
+                    // CSS pixels: 300 video + 70 button strip.
+                    // inner_size takes logical (= CSS) pixels, so do NOT divide by scale.
+                    // Physical height = overlay_h * scale, which varies by DPI — that's correct.
+                    let overlay_h: f64 = 370.0;
 
                     if let Err(err) = WebviewWindowBuilder::new(
                         app,
@@ -75,11 +78,11 @@ pub fn run() {
                     .drag_and_drop(false)
                     .position(
                         work_x as f64 / scale,
-                        (work_y + work_h as i32 - overlay_physical_h as i32) as f64 / scale,
+                        (work_y as f64 + work_h as f64) / scale - overlay_h,
                     )
                     .inner_size(
                         work_w as f64 / scale,
-                        overlay_physical_h as f64 / scale,
+                        overlay_h,
                     )
                     .build()
                     {
