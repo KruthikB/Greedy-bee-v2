@@ -50,9 +50,32 @@ def key_frame(rgba: np.ndarray) -> Image.Image:
     )
     mask = removed | pocket
 
+    # Always peel 1px of silhouette, then any remaining greenish fringe.
+    mask = ndimage.binary_dilation(mask, iterations=1)
+    fringe_green = (g > np.maximum(r, b) + 6) & (g >= 10)
+    dilated = ndimage.binary_dilation(mask, iterations=2)
+    mask = mask | (dilated & ~mask & fringe_green)
+
     out = rgba.copy()
     out[mask, 3] = 0
-    return Image.fromarray(out, "RGBA")
+    return Image.fromarray(_despill_edges(out), "RGBA")
+
+
+def _despill_edges(rgba: np.ndarray) -> np.ndarray:
+    """Remove green halo on opaque pixels next to transparency."""
+    out = rgba.copy()
+    opaque = out[:, :, 3] > 0
+    near_edge = opaque & ndimage.binary_dilation(~opaque, iterations=3)
+    rr = out[:, :, 0].astype(np.int16)
+    gg = out[:, :, 1].astype(np.int16)
+    bb = out[:, :, 2].astype(np.int16)
+    spill = near_edge & (gg > np.maximum(rr, bb))
+    if np.any(spill):
+        gg = gg.copy()
+        gg[spill] = np.maximum(rr[spill], bb[spill])
+        out[:, :, 1] = np.clip(gg, 0, 255).astype(np.uint8)
+    out[~opaque, :3] = 0
+    return out
 
 
 def crop_and_fit(img: Image.Image, target_h: int = 300) -> Image.Image:
@@ -71,7 +94,13 @@ def crop_and_fit(img: Image.Image, target_h: int = 300) -> Image.Image:
     # Normalize canvas height so playback layout stays stable.
     canvas = Image.new("RGBA", (max(1, cropped.width), target_h), (0, 0, 0, 0))
     canvas.paste(cropped, (0, target_h - cropped.height), cropped)
-    return canvas
+    # Resize can reintroduce a green halo — clean edges again at final size.
+    cleaned = _despill_edges(np.array(canvas))
+    # One final 1px peel at output resolution for any leftover fringe.
+    alpha = cleaned[:, :, 3] > 0
+    cleaned[ndimage.binary_dilation(~alpha, iterations=1) & alpha, 3] = 0
+    cleaned = _despill_edges(cleaned)
+    return Image.fromarray(cleaned, "RGBA")
 
 
 def main() -> int:
