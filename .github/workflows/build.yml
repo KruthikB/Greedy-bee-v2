@@ -32,13 +32,12 @@ jobs:
       - name: Install Tauri CLI
         run: cargo binstall tauri-cli@^2 --no-confirm
 
-      # ── 5. FFmpeg (not preinstalled on windows-latest) ────────────
-      - name: Install FFmpeg
+      # ── 5. Python deps for border flood-fill keyer ────────────────
+      #    ffmpeg chromakey was eating the face (green spill on skin).
+      #    Border-connected green removal keeps face/skin opaque.
+      - name: Install Python frame-extraction deps
         shell: pwsh
-        run: |
-          choco install ffmpeg -y --no-progress
-          if ($LASTEXITCODE -eq 3010) { exit 0 }
-          exit $LASTEXITCODE
+        run: python -m pip install --quiet numpy pillow scipy opencv-python-headless
 
       # ── 6. Convert green-screen video → transparent WebP frames ──
       #    WebView2 will not paint alpha <video>/WebM on a transparent window.
@@ -53,19 +52,17 @@ jobs:
           $framesDir = "frontend/assets/frames"
           New-Item -ItemType Directory -Force -Path $framesDir | Out-Null
           Remove-Item -Force "$framesDir/*" -ErrorAction SilentlyContinue
-          ffmpeg `
-            -y `
-            -i assets/character.mp4 `
-            -vf "chromakey=0x31A638:similarity=0.06:blend=0.0,format=rgba,crop=iw*0.42:ih:iw*0.58:0,scale=-1:300,fps=12" `
-            -c:v libwebp -lossless 1 -an `
-            "$framesDir/frame_%04d.webp"
+          python scripts/extract_character_frames.py `
+            --input assets/character.mp4 `
+            --out-dir $framesDir `
+            --fps 12 `
+            --height 300
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $count = (Get-ChildItem "$framesDir/frame_*.webp").Count
           if ($count -lt 1) {
-            Write-Error "ffmpeg produced no character frames."
+            Write-Error "Frame extraction produced no character frames."
             exit 1
           }
-          @{ frameCount = $count; fps = 12 } | ConvertTo-Json | Set-Content -Encoding utf8 "$framesDir/manifest.json"
           Write-Host "Generated $count character frames."
 
       # ── 7. Build the Tauri app ────────────────────────────────────
