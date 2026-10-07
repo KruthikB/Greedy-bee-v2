@@ -42,29 +42,23 @@ jobs:
         shell: pwsh
         run: python -m pip install --quiet numpy pillow scipy opencv-python-headless
 
-      # ── 6. Convert green-screen video → transparent WebP frames ──
-      - name: Convert character video (green screen → WebP frames)
+      # ── 6. Build character assets (video frames + 3D catalog) ────
+      - name: Build character assets
         shell: pwsh
         run: |
-          if (-not (Test-Path "assets/character.mp4")) {
-            Write-Error "assets/character.mp4 is missing."
+          if (-not (Test-Path "assets/characters/water-guy/drink.mp4")) {
+            Write-Error "assets/characters/water-guy/drink.mp4 is missing."
             exit 1
           }
-          $framesDir = "frontend/assets/frames"
-          New-Item -ItemType Directory -Force -Path $framesDir | Out-Null
-          Remove-Item -Force "$framesDir/*" -ErrorAction SilentlyContinue
-          python scripts/extract_character_frames.py `
-            --input assets/character.mp4 `
-            --out-dir $framesDir `
-            --fps 12 `
-            --height 300
+          python scripts/build_character_assets.py `
+            --packs assets/characters `
+            --out frontend/assets/characters
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $count = (Get-ChildItem "$framesDir/frame_*.webp").Count
-          if ($count -lt 1) {
-            Write-Error "Frame extraction produced no character frames."
+          if (-not (Test-Path "frontend/assets/characters/catalog.json")) {
+            Write-Error "Character catalog was not produced."
             exit 1
           }
-          Write-Host "Generated $count character frames."
+          Write-Host "Character catalog ready."
 
       # ── 7. Detect Azure Artifact Signing configuration ───────────
       #    Unsigned EXEs are blocked by Chrome Safe Browsing and most

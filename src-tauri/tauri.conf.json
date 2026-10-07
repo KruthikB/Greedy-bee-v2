@@ -9,18 +9,18 @@
   "app": {
     "withGlobalTauri": true,
     "security": {
-      "csp": "default-src 'self'; media-src 'self' blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; media-src 'self' blob:; img-src 'self' blob: data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost"
     },
     "windows": [
       {
         "label": "settings",
         "title": "Greedy Bee",
         "url": "settings/index.html",
-        "width": 440,
-        "height": 560,
-        "minWidth": 440,
-        "minHeight": 560,
-        "resizable": false,
+        "width": 520,
+        "height": 720,
+        "minWidth": 480,
+        "minHeight": 600,
+        "resizable": true,
         "visible": true,
         "center": true,
         "skipTaskbar": false,

@@ -20,3 +20,8 @@ pub fn set_clickthrough(_window: &tauri::WebviewWindow, _enabled: bool) {}
 
 #[cfg(not(target_os = "windows"))]
 pub fn start_monitor(_tx: tokio::sync::mpsc::UnboundedSender<PlatformEvent>) {}
+
+#[cfg(not(target_os = "windows"))]
+pub fn show_error(message: &str) {
+    eprintln!("{message}");
+}

@@ -4,24 +4,30 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="stylesheet" href="overlay.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "../vendor/three/three.module.js",
+      "three/addons/": "../vendor/three/examples/jsm/"
+    }
+  }
+  </script>
 </head>
 <body class="hidden">
 
-  <!-- Character frames are baked at build time (no runtime green-screen work). -->
   <div id="video-container">
     <canvas id="character-canvas"></canvas>
   </div>
 
-  <!-- Button strip shown after animation ends -->
   <div id="button-strip">
     <span id="question-label">💧  Did you remember to drink water?</span>
-    <span id="drink-now-label">💧  Drink Now!  Get up and drink a glass of water.</span>
+    <span id="drink-now-label">💧  Drink Now!</span>
     <div class="spacer"></div>
-    <button class="btn" id="yes-btn">✅  Yes, I drank!</button>
+    <button class="btn" id="yes-btn">✅  Yes!</button>
     <button class="btn" id="no-btn">❌  Not yet</button>
-    <button class="btn" id="done-btn">✅  Done!  I drank</button>
+    <button class="btn" id="done-btn">✅  Done!</button>
   </div>
 
-  <script src="overlay.js"></script>
+  <script type="module" src="overlay.js"></script>
 </body>
 </html>

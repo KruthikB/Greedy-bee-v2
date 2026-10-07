@@ -1,0 +1,10 @@
+{
+  "id": "water-guy",
+  "name": "Kaybie",
+  "type": "video",
+  "actions": {
+    "drink": "drink.mp4",
+    "board": "board.mp4"
+  },
+  "credit": null
+}

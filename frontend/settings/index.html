@@ -10,30 +10,99 @@
   <div class="app">
 
     <header>
-      <div class="logo">💧</div>
+      <div class="logo">🐝</div>
       <div class="app-name">Greedy Bee</div>
-      <div class="tagline">Stay hydrated. Stay sharp.</div>
+      <div class="tagline">Custom reminders with character popups</div>
     </header>
 
-    <!-- Status card -->
     <div class="card">
       <div id="status-badge" class="badge badge-running">● Running</div>
       <div id="countdown-label" class="countdown">Next reminder in —:——</div>
     </div>
 
-    <!-- Interval control -->
     <div class="card">
-      <label class="section-label">Remind me every</label>
-      <div class="row">
-        <input id="interval-input" type="number" min="1" max="240" value="15" />
-        <span class="unit">minutes</span>
-        <button id="apply-btn" class="btn btn-primary">Apply</button>
+      <div class="row between">
+        <label class="section-label">Reminders</label>
+        <button id="add-btn" class="btn btn-primary">+ Add</button>
       </div>
+      <div id="reminder-list" class="reminder-list"></div>
+      <div id="reminder-cap" class="hint">Up to 10 reminders</div>
     </div>
 
-    <!-- Pause controls -->
+    <div id="editor-card" class="card editor hidden">
+      <label class="section-label" id="editor-title">Edit reminder</label>
+      <input type="hidden" id="edit-id" />
+
+      <label class="field-label">Name</label>
+      <input id="edit-name" type="text" maxlength="60" placeholder="Drink water" />
+
+      <label class="field-label">Character</label>
+      <div id="edit-character-picker" class="char-picker" role="listbox" aria-label="Character"></div>
+      <input type="hidden" id="edit-character" value="" />
+
+      <label class="field-label">Action</label>
+      <select id="edit-action"></select>
+
+      <label class="field-label">Popup message <span id="msg-count" class="counter">0/80</span></label>
+      <input id="edit-message" type="text" maxlength="80" placeholder="Did you remember to drink water?" />
+
+      <div id="board-field" class="hidden">
+        <label class="field-label">Board text <span id="board-count" class="counter">0/30</span></label>
+        <input id="edit-board" type="text" maxlength="100" placeholder="Stand up and stretch now" />
+        <div class="hint">20–30 characters, or a link (http/https)</div>
+      </div>
+
+      <label class="field-label">“Not yet” message</label>
+      <input id="edit-not-yet" type="text" maxlength="80" placeholder="Do it now!" />
+
+      <label class="field-label">Schedule</label>
+      <select id="edit-schedule-type">
+        <option value="interval">Every N minutes</option>
+        <option value="once">Once (date + time)</option>
+        <option value="daily">Daily at time</option>
+        <option value="weekly">Weekly on days</option>
+      </select>
+
+      <div id="sched-interval" class="sched-pane">
+        <div class="row">
+          <input id="edit-minutes" type="number" min="1" max="240" value="15" />
+          <span class="unit">minutes</span>
+        </div>
+      </div>
+
+      <div id="sched-once" class="sched-pane hidden">
+        <div class="row">
+          <input id="edit-date" type="date" />
+          <input id="edit-once-time" type="time" />
+        </div>
+      </div>
+
+      <div id="sched-daily" class="sched-pane hidden">
+        <input id="edit-daily-time" type="time" />
+      </div>
+
+      <div id="sched-weekly" class="sched-pane hidden">
+        <div class="days" id="edit-days">
+          <label><input type="checkbox" value="0" /> Mon</label>
+          <label><input type="checkbox" value="1" /> Tue</label>
+          <label><input type="checkbox" value="2" /> Wed</label>
+          <label><input type="checkbox" value="3" /> Thu</label>
+          <label><input type="checkbox" value="4" /> Fri</label>
+          <label><input type="checkbox" value="5" /> Sat</label>
+          <label><input type="checkbox" value="6" /> Sun</label>
+        </div>
+        <input id="edit-weekly-time" type="time" />
+      </div>
+
+      <div class="row">
+        <button id="save-btn" class="btn btn-primary grow">Save</button>
+        <button id="cancel-btn" class="btn btn-secondary">Cancel</button>
+      </div>
+      <div id="editor-error" class="error"></div>
+    </div>
+
     <div class="card">
-      <label class="section-label">Pause reminders</label>
+      <label class="section-label">Pause all reminders</label>
       <div class="row wrap">
         <button class="btn btn-secondary" data-pause="30">30 min</button>
         <button class="btn btn-secondary" data-pause="60">1 hour</button>
@@ -43,10 +112,12 @@
       <button id="resume-btn" class="btn btn-accent" disabled>Resume Now</button>
     </div>
 
-    <!-- Test + Quit -->
     <div class="card actions-row">
-      <button id="test-btn" class="btn btn-ghost">Test Reminder Now</button>
       <button id="quit-btn" class="btn btn-danger">Quit Greedy Bee</button>
+    </div>
+
+    <div class="about" id="about-credits">
+      Characters: green-screen packs under assets/characters/ (backdrop #00FF00)
     </div>
 
   </div>
