@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Greedy Bee character local test</title>
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: linear-gradient(180deg, #1b4332, #40916c);
+      font-family: Segoe UI, sans-serif;
+      color: #fff;
+    }
+    #hud {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      z-index: 5;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    button { padding: 8px 14px; font-size: 14px; }
+    #stage {
+      position: fixed;
+      left: 0;
+      bottom: 70px;
+      height: 300px;
+    }
+    #character-canvas {
+      height: 300px;
+      width: auto;
+      display: block;
+      background: transparent;
+    }
+    #strip {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 70px;
+      display: none;
+      align-items: center;
+      padding: 0 24px;
+      gap: 12px;
+    }
+    #strip.visible { display: flex; }
+    .label {
+      background: rgba(0,0,0,.67);
+      border-radius: 10px;
+      padding: 8px 16px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <button id="play">Play character</button>
+    <span id="status">idle</span>
+  </div>
+  <div id="stage">
+    <canvas id="character-canvas"></canvas>
+  </div>
+  <div id="strip">
+    <span class="label">Did you remember to drink water?</span>
+  </div>
+  <script>
+    const canvas = document.getElementById('character-canvas');
+    const ctx = canvas.getContext('2d', { alpha: true });
+    const strip = document.getElementById('strip');
+    const status = document.getElementById('status');
+    let frames = [];
+    let fps = 12;
+
+    async function loadFrames() {
+      const manifest = await fetch('../assets/frames/manifest.json').then(r => r.json());
+      fps = manifest.fps || 12;
+      frames = await Promise.all(Array.from({ length: manifest.frameCount }, (_, i) => {
+        const img = new Image();
+        const n = String(i + 1).padStart(4, '0');
+        img.src = `../assets/frames/frame_${n}.webp`;
+        return new Promise((resolve, reject) => {
+          img.onload = () => resolve(img);
+          img.onerror = () => reject(new Error('frame ' + n));
+        });
+      }));
+      status.textContent = `loaded ${frames.length} frames`;
+    }
+
+    async function play() {
+      if (!frames.length) await loadFrames();
+      strip.classList.remove('visible');
+      const first = frames[0];
+      canvas.width = first.naturalWidth;
+      canvas.height = first.naturalHeight;
+      const frameMs = Math.round(1000 / fps);
+      let i = 0;
+      status.textContent = 'playing';
+      const step = () => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(frames[i], 0, 0);
+        i += 1;
+        if (i >= frames.length) {
+          strip.classList.add('visible');
+          status.textContent = 'done — strip visible';
+          return;
+        }
+        setTimeout(step, frameMs);
+      };
+      step();
+    }
+
+    document.getElementById('play').onclick = () => play().catch(err => {
+      status.textContent = String(err);
+      console.error(err);
+    });
+    loadFrames().catch(err => { status.textContent = String(err); });
+  </script>
+</body>
+</html>

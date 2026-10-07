@@ -40,7 +40,7 @@ del /q "%FRAMES%\frame_*.webp" 2>nul
 del /q "%MANIFEST%" 2>nul
 
 ffmpeg -y -i "%SOURCE%" ^
-  -vf "chromakey=0x00b140:similarity=0.35:blend=0.15,format=rgba,scale=-1:300,fps=12" ^
+  -vf "chromakey=0x31A638:similarity=0.12:blend=0.08,format=rgba,scale=-1:300,fps=12" ^
   -c:v libwebp ^
   -lossless 0 ^
   -compression_level 4 ^
@@ -52,7 +52,7 @@ if %ERRORLEVEL% neq 0 (
     echo.
     echo [ERROR] ffmpeg failed. Make sure:
     echo   1. ffmpeg is installed  (winget install ffmpeg)
-    echo   2. The background colour in the video matches 0x00b140
+    echo   2. The background colour in the video matches 0x31A638
     echo      If not, update the chromakey= value in this script.
     exit /b 1
 )
