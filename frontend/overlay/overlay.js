@@ -74,12 +74,15 @@ function playFrames() {
     return;
   }
 
-  const first = frames[0];
-  if (canvas.width !== first.naturalWidth || canvas.height !== first.naturalHeight) {
-    canvas.width = first.naturalWidth;
-    canvas.height = first.naturalHeight;
-  }
+  // Use the widest frame so narrow entry-frames don't clip later ones.
+  const maxW    = frames.reduce((m, f) => Math.max(m, f.naturalWidth), 0);
+  const targetH = frames[0].naturalHeight;
 
+  canvas.width  = maxW;
+  canvas.height = targetH;
+  // Explicit inline styles — don't rely on `width: auto` in WebView2.
+  canvas.style.width  = maxW   + 'px';
+  canvas.style.height = targetH + 'px';
   const frameMs = Math.max(16, Math.round(1000 / fps));
   let index = 0;
 

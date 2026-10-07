@@ -20,19 +20,18 @@ body.hidden {
   pointer-events: none;
 }
 
-/* Character video — positioned at bottom-left, 300px tall */
+/* Character — sits in bottom-left quadrant with breathing room from the edge */
 #video-container {
   position: absolute;
   bottom: 70px;
-  left: 0;
+  left: 15%;
   width: auto;
   height: 300px;
 }
 
 #character-canvas {
-  height: 300px;
-  width: auto;
   display: block;
+  /* width and height are set by JS to the max frame dimensions */
 }
 
 /* Button strip — full width, 70px tall, at very bottom */
