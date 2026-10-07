@@ -2,7 +2,7 @@
 REM ============================================================
 REM  process_video.bat
 REM  One-time conversion: green-screen MP4  ->  transparent WebP frames
-REM  Run this ONCE before building. Requires ffmpeg in PATH.
+REM  Run this ONCE before building. Requires Python + deps.
 REM  Output: frontend\assets\frames\frame_XXXX.webp + manifest.json
 REM
 REM  Source video search order:
@@ -32,33 +32,26 @@ if exist "%MANIFEST%" (
 
 echo [INFO] Converting green-screen video to transparent WebP frames...
 echo        Source : %SOURCE%
-echo        Output : %FRAMES%\frame_%%%%04d.webp
+echo        Output : %FRAMES%
+echo        Method : border flood-fill (keeps face / skin)
 echo.
 
 if not exist "%FRAMES%" mkdir "%FRAMES%"
 del /q "%FRAMES%\frame_*.webp" 2>nul
 del /q "%MANIFEST%" 2>nul
 
-ffmpeg -y -i "%SOURCE%" ^
-  -vf "chromakey=0x31A638:similarity=0.06:blend=0.0,format=rgba,crop=iw*0.42:ih:iw*0.58:0,scale=-1:300,fps=12" ^
-  -c:v libwebp ^
-  -lossless 1 ^
-  -an ^
-  "%FRAMES%\frame_%%04d.webp"
-
+python -m pip install --quiet numpy pillow scipy opencv-python-headless
 if %ERRORLEVEL% neq 0 (
-    echo.
-    echo [ERROR] ffmpeg failed. Make sure:
-    echo   1. ffmpeg is installed  (winget install ffmpeg)
-    echo   2. The background colour in the video matches 0x31A638
-    echo      If not, update the chromakey= value in this script.
+    echo [ERROR] Failed to install Python dependencies.
     exit /b 1
 )
 
-powershell -NoProfile -Command ^
-  "$c=(Get-ChildItem '%FRAMES%\frame_*.webp').Count; @{frameCount=$c;fps=12} | ConvertTo-Json | Set-Content -Encoding utf8 '%MANIFEST%'; Write-Host \"Generated $c character frames.\""
-
-if %ERRORLEVEL% neq 0 exit /b 1
+python scripts\extract_character_frames.py --input "%SOURCE%" --out-dir "%FRAMES%" --fps 12 --height 300
+if %ERRORLEVEL% neq 0 (
+    echo.
+    echo [ERROR] Frame extraction failed.
+    exit /b 1
+)
 
 echo.
 echo [OK] Done! Output: %FRAMES%
