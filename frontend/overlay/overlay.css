@@ -20,11 +20,11 @@ body.hidden {
   pointer-events: none;
 }
 
-/* Character — sits in bottom-left quadrant with breathing room from the edge */
+/* Character — frame pinned to left edge; walk-in comes from the video frames */
 #video-container {
   position: absolute;
   bottom: 70px;
-  left: 15%;
+  left: 0;
   width: auto;
   height: 300px;
 }
