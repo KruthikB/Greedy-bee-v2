@@ -1,7 +1,7 @@
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager,
+    AppHandle, Manager,
 };
 
 use crate::{scheduler, AppState};
@@ -26,7 +26,13 @@ pub fn build_tray(app: &tauri::App) -> tauri::Result<()> {
         "pause_menu",
         "Pause for Meeting",
         true,
-        &[&pause_30, &pause_60, &pause_120, &PredefinedMenuItem::separator(app)?, &pause_indef],
+        &[
+            &pause_30,
+            &pause_60,
+            &pause_120,
+            &PredefinedMenuItem::separator(app)?,
+            &pause_indef,
+        ],
     )?;
 
     let resume = MenuItem::with_id(app, "resume", "Resume Now", true, None::<&str>)?;
@@ -73,13 +79,7 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
         "pause_120" => scheduler::pause(&state.scheduler, Some(120), app),
         "pause_indef" => scheduler::pause(&state.scheduler, None, app),
         "resume" => scheduler::resume(&state.scheduler, app),
-        "test" => {
-            if let Some(overlay) = app.get_webview_window("overlay") {
-                let _ = overlay.show();
-                let _ = overlay.set_always_on_top(true);
-                let _ = overlay.emit("reminder-fire", ());
-            }
-        }
+        "test" => scheduler::test_reminder(&state.scheduler, None, app),
         "quit" => app.exit(0),
         _ => {}
     }

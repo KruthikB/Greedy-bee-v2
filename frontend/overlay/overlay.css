@@ -20,19 +20,22 @@ body.hidden {
   pointer-events: none;
 }
 
-/* Character — frame pinned to left edge; walk-in comes from the video frames */
+/* Full video frame — left edge fixed to screen left, 300px tall */
 #video-container {
   position: absolute;
   bottom: 70px;
   left: 0;
   width: auto;
   height: 300px;
+  overflow: visible;
 }
 
 #character-canvas {
+  height: 300px;
+  width: auto;
+  max-height: 300px;
   display: block;
-  /* width and height are set by JS to the max frame dimensions */
-  filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.35));
+  vertical-align: bottom;
 }
 
 /* Button strip — full width, 70px tall, at very bottom */

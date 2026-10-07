@@ -1,0 +1,63 @@
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+
+/// Create the transparent overlay window on demand (not at startup) so a hidden
+/// WebView2 compositor does not burn CPU/GPU while idle.
+pub fn create(app: &AppHandle) -> tauri::Result<()> {
+    if app.get_webview_window("overlay").is_some() {
+        return Ok(());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let (mut work_w, work_h, work_x, work_y) = crate::platform::get_work_area();
+        if work_w == 0 {
+            work_w = 1280;
+        }
+        let mut scale = app
+            .primary_monitor()
+            .ok()
+            .flatten()
+            .map(|m| m.scale_factor())
+            .unwrap_or(1.0);
+        if !scale.is_finite() || scale < 0.5 {
+            scale = 1.0;
+        }
+        let overlay_physical_h = 370u32; // 300 video + 70 button strip
+
+        WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App("overlay/index.html".into()))
+            .title("")
+            .transparent(true)
+            .decorations(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .shadow(false)
+            .visible(true)
+            .drag_and_drop(false)
+            .position(
+                work_x as f64 / scale,
+                (work_y + work_h as i32 - overlay_physical_h as i32) as f64 / scale,
+            )
+            .inner_size(work_w as f64 / scale, overlay_physical_h as f64 / scale)
+            .build()?;
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App("overlay/index.html".into()))
+            .title("")
+            .transparent(true)
+            .decorations(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .visible(true)
+            .build()?;
+    }
+
+    Ok(())
+}
+
+pub fn destroy(app: &AppHandle) {
+    if let Some(overlay) = app.get_webview_window("overlay") {
+        let _ = overlay.close();
+    }
+}

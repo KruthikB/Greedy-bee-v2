@@ -3,12 +3,21 @@ src-tauri/target/
 src-tauri/gen/
 
 # Generated at build time by scripts/process_video.bat or CI.
-# Keep the folder, ignore converted frames / any files dropped here by mistake.
 frontend/assets/*
 !frontend/assets/.gitkeep
+!frontend/assets/characters/
+frontend/assets/characters/**
+!frontend/assets/characters/.gitkeep
+!frontend/assets/animations/
+frontend/assets/animations/**
+!frontend/assets/animations/.gitkeep
+
+# Legacy frames path (kept empty)
 !frontend/assets/frames/
 frontend/assets/frames/*
 !frontend/assets/frames/.gitkeep
+
+# Vendored three.js is committed under frontend/vendor/
 
 # macOS
 .DS_Store
