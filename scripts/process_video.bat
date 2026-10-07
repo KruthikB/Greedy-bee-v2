@@ -1,16 +1,17 @@
 @echo off
 REM ============================================================
 REM  process_video.bat
-REM  One-time conversion: green-screen MP4  ->  transparent WebM
+REM  One-time conversion: green-screen MP4  ->  transparent WebP frames
 REM  Run this ONCE before building. Requires ffmpeg in PATH.
-REM  Output: frontend\assets\character_transparent.webm
+REM  Output: frontend\assets\frames\frame_XXXX.webp + manifest.json
 REM
 REM  Source video search order:
 REM    1. assets\character.mp4          (put it here for CI / clean repo)
 REM    2. ..\greedy-bee\assets\character.mp4  (local dev side-by-side)
 REM ============================================================
 
-set OUTPUT=frontend\assets\character_transparent.webm
+set FRAMES=frontend\assets\frames
+set MANIFEST=%FRAMES%\manifest.json
 
 REM Find the source video
 if exist "assets\character.mp4" (
@@ -24,24 +25,28 @@ if exist "assets\character.mp4" (
     exit /b 1
 )
 
-if exist "%OUTPUT%" (
-    echo [INFO] %OUTPUT% already exists. Delete it to re-process.
+if exist "%MANIFEST%" (
+    echo [INFO] %MANIFEST% already exists. Delete frontend\assets\frames to re-process.
     exit /b 0
 )
 
-echo [INFO] Converting green-screen video to transparent WebM...
+echo [INFO] Converting green-screen video to transparent WebP frames...
 echo        Source : %SOURCE%
-echo        Output : %OUTPUT%
+echo        Output : %FRAMES%\frame_%%%%04d.webp
 echo.
 
-ffmpeg -i "%SOURCE%" ^
-  -vf "chromakey=0x00b140:similarity=0.35:blend=0.15,format=yuva420p" ^
-  -c:v libvpx-vp9 ^
-  -b:v 0 ^
-  -crf 30 ^
-  -auto-alt-ref 0 ^
+if not exist "%FRAMES%" mkdir "%FRAMES%"
+del /q "%FRAMES%\frame_*.webp" 2>nul
+del /q "%MANIFEST%" 2>nul
+
+ffmpeg -y -i "%SOURCE%" ^
+  -vf "chromakey=0x00b140:similarity=0.35:blend=0.15,format=rgba,scale=-1:300,fps=12" ^
+  -c:v libwebp ^
+  -lossless 0 ^
+  -compression_level 4 ^
+  -q:v 55 ^
   -an ^
-  "%OUTPUT%"
+  "%FRAMES%\frame_%%04d.webp"
 
 if %ERRORLEVEL% neq 0 (
     echo.
@@ -52,6 +57,11 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
+powershell -NoProfile -Command ^
+  "$c=(Get-ChildItem '%FRAMES%\frame_*.webp').Count; @{frameCount=$c;fps=12} | ConvertTo-Json | Set-Content -Encoding utf8 '%MANIFEST%'; Write-Host \"Generated $c character frames.\""
+
+if %ERRORLEVEL% neq 0 exit /b 1
+
 echo.
-echo [OK] Done! Output: %OUTPUT%
+echo [OK] Done! Output: %FRAMES%
 echo      You can now run build.bat or dev.bat

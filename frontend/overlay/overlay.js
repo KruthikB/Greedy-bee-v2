@@ -2,7 +2,6 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
-const video       = document.getElementById('character-video');
 const canvas      = document.getElementById('character-canvas');
 const ctx         = canvas.getContext('2d', { alpha: true });
 const strip       = document.getElementById('button-strip');
@@ -13,63 +12,100 @@ const noBtn       = document.getElementById('no-btn');
 const doneBtn     = document.getElementById('done-btn');
 
 let state = 'hidden'; // 'hidden' | 'playing' | 'asking' | 'drink-now'
-let paintHandle = 0;
+let frames = [];
+let fps = 12;
+let framesReady = null;
+let paintTimer = 0;
 let safetyTimer = 0;
-let usingVideoFrameCallback = typeof video.requestVideoFrameCallback === 'function';
 
-function stopPainting() {
-  if (usingVideoFrameCallback && paintHandle) {
-    try { video.cancelVideoFrameCallback(paintHandle); } catch (_) { /* ignore */ }
-  } else {
-    cancelAnimationFrame(paintHandle);
+function clearTimers() {
+  if (paintTimer) {
+    clearTimeout(paintTimer);
+    paintTimer = 0;
   }
-  paintHandle = 0;
-}
-
-function clearSafetyTimer() {
   if (safetyTimer) {
     clearTimeout(safetyTimer);
     safetyTimer = 0;
   }
 }
 
-function drawFrame() {
-  if (video.videoWidth && video.videoHeight) {
-    if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-    }
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(video, 0, 0);
-  }
+function clearCanvas() {
+  ctx.clearRect(0, 0, canvas.width || 1, canvas.height || 1);
 }
 
-function paintLoop() {
-  drawFrame();
-  if (video.paused || video.ended || state !== 'playing') {
-    paintHandle = 0;
+async function loadFrames() {
+  const manifest = await fetch('../assets/frames/manifest.json').then((r) => {
+    if (!r.ok) throw new Error(`manifest ${r.status}`);
+    return r.json();
+  });
+  fps = Number(manifest.fps) || 12;
+  const count = Number(manifest.frameCount) || 0;
+  if (count < 1) throw new Error('no frames in manifest');
+
+  const loaded = await Promise.all(
+    Array.from({ length: count }, (_, i) => {
+      const n = String(i + 1).padStart(4, '0');
+      const img = new Image();
+      img.src = `../assets/frames/frame_${n}.webp`;
+      return new Promise((resolve, reject) => {
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error(`failed to load frame_${n}.webp`));
+      });
+    }),
+  );
+  frames = loaded;
+  return frames;
+}
+
+function ensureFrames() {
+  if (!framesReady) {
+    framesReady = loadFrames().catch((err) => {
+      console.error('Greedy Bee: character frames failed to load', err);
+      framesReady = null;
+      throw err;
+    });
+  }
+  return framesReady;
+}
+
+function playFrames() {
+  if (!frames.length) {
+    onAnimationEnded();
     return;
   }
-  if (usingVideoFrameCallback) {
-    paintHandle = video.requestVideoFrameCallback(() => paintLoop());
-  } else {
-    paintHandle = requestAnimationFrame(paintLoop);
-  }
-}
 
-function startPainting() {
-  stopPainting();
-  paintLoop();
+  const first = frames[0];
+  if (canvas.width !== first.naturalWidth || canvas.height !== first.naturalHeight) {
+    canvas.width = first.naturalWidth;
+    canvas.height = first.naturalHeight;
+  }
+
+  const frameMs = Math.max(16, Math.round(1000 / fps));
+  let index = 0;
+
+  const step = () => {
+    if (state !== 'playing') return;
+    const frame = frames[index];
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(frame, 0, 0);
+    index += 1;
+    if (index >= frames.length) {
+      onAnimationEnded();
+      return;
+    }
+    paintTimer = setTimeout(step, frameMs);
+  };
+
+  step();
 }
 
 async function init() {
   await listen('reminder-fire', () => showReminder());
-  video.addEventListener('play', startPainting);
-  video.addEventListener('ended', onVideoEnded);
-  video.addEventListener('error', onVideoEnded);
   yesBtn.addEventListener('click', dismissOverlay);
   doneBtn.addEventListener('click', dismissOverlay);
   noBtn.addEventListener('click', onNo);
+  // Warm the frame cache while settings is open.
+  ensureFrames().catch(() => {});
 }
 
 async function showReminder() {
@@ -82,30 +118,28 @@ async function showReminder() {
   yesBtn.style.display = 'block';
   noBtn.style.display = 'block';
   doneBtn.style.display = 'none';
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  clearCanvas();
+  clearTimers();
 
   await invoke('set_overlay_clickthrough', { enabled: true });
   document.body.classList.remove('hidden');
 
-  clearSafetyTimer();
   safetyTimer = setTimeout(() => {
-    if (state === 'playing') onVideoEnded();
-  }, 8000);
+    if (state === 'playing') onAnimationEnded();
+  }, 12000);
 
-  video.currentTime = 0;
   try {
-    await video.play();
+    await ensureFrames();
+    playFrames();
   } catch (_) {
-    onVideoEnded();
+    onAnimationEnded();
   }
 }
 
-async function onVideoEnded() {
+async function onAnimationEnded() {
   if (state !== 'playing') return;
   state = 'asking';
-  clearSafetyTimer();
-  stopPainting();
-  drawFrame();
+  clearTimers();
 
   await invoke('set_overlay_clickthrough', { enabled: false });
   strip.classList.add('visible');
@@ -122,15 +156,12 @@ function onNo() {
 
 async function dismissOverlay() {
   document.body.classList.add('hidden');
-  await new Promise(r => setTimeout(r, 350));
+  await new Promise((r) => setTimeout(r, 350));
 
-  clearSafetyTimer();
-  stopPainting();
+  clearTimers();
   state = 'hidden';
   strip.classList.remove('visible');
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  video.pause();
-  video.currentTime = 0;
+  clearCanvas();
 
   await invoke('dismiss_overlay');
 }

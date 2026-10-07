@@ -3,9 +3,12 @@ src-tauri/target/
 src-tauri/gen/
 
 # Generated at build time by scripts/process_video.bat or CI.
-# Keep the folder, ignore the converted video and any files dropped here by mistake.
+# Keep the folder, ignore converted frames / any files dropped here by mistake.
 frontend/assets/*
 !frontend/assets/.gitkeep
+!frontend/assets/frames/
+frontend/assets/frames/*
+!frontend/assets/frames/.gitkeep
 
 # macOS
 .DS_Store
