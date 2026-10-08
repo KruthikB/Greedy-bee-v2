@@ -72,7 +72,7 @@ scripts\process_video.bat
 - Keep the full frame you want on screen — the build does **not** crop to the character
 - Prefer 5–10 seconds; 24 fps is fine (build samples at 12 fps)
 - Output height is 300px; width follows the source aspect ratio (e.g. 1920×1080 → 533×300)
-- **Thumbnail:** last keyed frame of `drink` (else first action) → `thumb.webp` in the catalog
+- **Thumbnail:** optional `cover.jpg` / `cover.png` / `cover.webp` in the pack becomes the Settings cover; otherwise last keyed frame of `drink`
 - **Board clips:** end with the character holding a **blank white board**. The build detects that region; reminder board text/link is drawn only inside it (no overflow)
 
 ### Board text rules (Settings)

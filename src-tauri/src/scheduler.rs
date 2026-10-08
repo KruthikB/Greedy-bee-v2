@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::config::{self, Config, Reminder};
+use crate::config::{self, Config, Reminder, Schedule};
 
 pub struct SchedulerState {
     pub reminders: Vec<ReminderRuntime>,
@@ -12,6 +12,8 @@ pub struct SchedulerState {
     pub pause_until: Option<Instant>,
     pub queue: VecDeque<String>,
     pub active_id: Option<String>,
+    /// When the current overlay fire started (for stuck-active recovery).
+    pub active_since: Option<Instant>,
 }
 
 pub struct ReminderRuntime {
@@ -43,6 +45,7 @@ impl SchedulerState {
             pause_until: None,
             queue: VecDeque::new(),
             active_id: None,
+            active_since: None,
         }
     }
 
@@ -200,6 +203,18 @@ pub async fn run_loop(state: Arc<Mutex<SchedulerState>>, app: AppHandle) {
                 }
             }
 
+            // Recover if overlay never showed / user never dismissed.
+            if let (Some(_), Some(since)) = (&s.active_id, s.active_since) {
+                if now_instant.duration_since(since) > Duration::from_secs(20) {
+                    eprintln!("Greedy Bee: clearing stuck overlay active_id after 20s");
+                    s.active_id = None;
+                    s.active_since = None;
+                    if let Some(overlay) = app.get_webview_window("overlay") {
+                        let _ = overlay.hide();
+                    }
+                }
+            }
+
             if s.active_id.is_none() {
                 if let Some(next_id) = s.queue.pop_front() {
                     if let Some(rt) = s.find(&next_id) {
@@ -212,6 +227,7 @@ pub async fn run_loop(state: Arc<Mutex<SchedulerState>>, app: AppHandle) {
                             not_yet_message: rt.reminder.not_yet_message.clone(),
                         };
                         s.active_id = Some(next_id);
+                        s.active_since = Some(Instant::now());
                         drop(s);
                         fire_overlay(&app, payload);
                         continue;
@@ -235,24 +251,51 @@ fn reschedule_all_after_resume(s: &mut SchedulerState) {
 }
 
 pub fn fire_overlay(app: &AppHandle, payload: ReminderFirePayload) {
-    // Ensure overlay window exists (on-demand lifecycle).
-    if app.get_webview_window("overlay").is_none() {
-        if let Err(err) = crate::overlay_window::create(app) {
-            eprintln!("Greedy Bee: failed to create overlay: {err}");
-            return;
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let needs_create = app.get_webview_window("overlay").is_none();
+        if needs_create {
+            if let Some(state) = app.try_state::<crate::AppState>() {
+                if let Ok(mut ready) = state.overlay_ready.lock() {
+                    *ready = false;
+                }
+            }
+            if let Err(err) = crate::overlay_window::create(&app) {
+                eprintln!("Greedy Bee: failed to create overlay: {err}");
+                return;
+            }
         }
-    }
-    if let Some(overlay) = app.get_webview_window("overlay") {
-        let _ = overlay.show();
-        let _ = overlay.set_always_on_top(true);
-        let _ = overlay.emit("reminder-fire", payload);
-    }
+
+        // Wait until JS has registered the listener (or timeout).
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let ready = app
+                .try_state::<crate::AppState>()
+                .and_then(|s| s.overlay_ready.lock().ok().map(|g| *g))
+                .unwrap_or(false);
+            if ready || Instant::now() >= deadline {
+                if !ready {
+                    eprintln!("Greedy Bee: overlay_ready timeout — emitting anyway");
+                }
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(40)).await;
+        }
+
+        if let Some(overlay) = app.get_webview_window("overlay") {
+            let _ = overlay.show();
+            let _ = overlay.set_always_on_top(true);
+            crate::platform::set_clickthrough(&overlay, true);
+            let _ = overlay.emit("reminder-fire", payload);
+        }
+    });
 }
 
 pub fn on_dismiss(state: &Arc<Mutex<SchedulerState>>, id: &str, app: &AppHandle) {
     let mut s = state.lock().unwrap();
     if s.active_id.as_deref() == Some(id) {
         s.active_id = None;
+        s.active_since = None;
     }
     // Remove from queue if still present
     s.queue.retain(|q| q != id);
@@ -297,6 +340,7 @@ fn try_fire_next(state: &Arc<Mutex<SchedulerState>>, app: &AppHandle) {
                 not_yet_message: rt.reminder.not_yet_message.clone(),
             };
             s.active_id = Some(next_id);
+            s.active_since = Some(Instant::now());
             drop(s);
             fire_overlay(app, payload);
         }
@@ -371,6 +415,7 @@ pub fn test_reminder(state: &Arc<Mutex<SchedulerState>>, id: Option<&str>, app: 
         not_yet_message: reminder.not_yet_message.clone(),
     };
     s.active_id = Some(reminder.id);
+    s.active_since = Some(Instant::now());
     drop(s);
     fire_overlay(app, payload);
 }

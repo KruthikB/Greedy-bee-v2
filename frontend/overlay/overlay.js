@@ -1,5 +1,3 @@
-import { playModelCharacter, disposeCharacter3d, forceOffscreenFallback } from './character3d.js';
-
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
@@ -14,10 +12,11 @@ const doneBtn = document.getElementById('done-btn');
 
 let state = 'hidden'; // 'hidden' | 'playing' | 'asking' | 'drink-now'
 let activeReminder = null;
-let videoCache = new Map(); // key: character/action -> { frames, fps, boardRect }
+let videoCache = new Map(); // key: character/action -> { frames, fps, boardRect, loading }
 let paintTimer = 0;
 let safetyTimer = 0;
 let catalog = null;
+let character3d = null; // lazy-loaded only for model packs
 
 function clearTimers() {
   if (paintTimer) {
@@ -57,6 +56,22 @@ function characterMeta(id) {
   return cat.find((c) => c.id === id) || { id, type: 'video', actions: ['drink'] };
 }
 
+async function ensureCharacter3d() {
+  if (!character3d) {
+    character3d = await import('./character3d.js');
+  }
+  return character3d;
+}
+
+function loadOneFrame(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`failed ${src}`));
+    img.src = src;
+  });
+}
+
 async function loadVideoFrames(character, action) {
   const key = `${character}/${action}`;
   if (videoCache.has(key)) return videoCache.get(key);
@@ -69,53 +84,76 @@ async function loadVideoFrames(character, action) {
       return r.json();
     });
   } catch (_) {
-    // Legacy path fallback
     manifest = await fetch('../assets/frames/manifest.json').then((r) => r.json());
-    const frames = await Promise.all(
-      Array.from({ length: manifest.frameCount }, (_, i) => {
+    const count = Number(manifest.frameCount) || 0;
+    const frames = new Array(count);
+    const prefetch = Math.min(8, count);
+    await Promise.all(
+      Array.from({ length: prefetch }, async (_, i) => {
         const n = String(i + 1).padStart(4, '0');
-        const img = new Image();
-        img.src = `../assets/frames/frame_${n}.webp`;
-        return new Promise((resolve, reject) => {
-          img.onload = () => resolve(img);
-          img.onerror = () => reject(new Error(`frame ${n}`));
-        });
+        frames[i] = await loadOneFrame(`../assets/frames/frame_${n}.webp`);
       }),
     );
-    const pack = { frames, fps: Number(manifest.fps) || 12, boardRect: null };
+    const pack = {
+      frames,
+      fps: Number(manifest.fps) || 12,
+      boardRect: null,
+      base: '../assets/frames',
+      count,
+    };
     videoCache.set(key, pack);
+    // Background-load the rest
+    void fillRemainingFrames(pack);
     return pack;
   }
 
   const fps = Number(manifest.fps) || 12;
   const count = Number(manifest.frameCount) || 0;
   const boardRect = manifest.boardRect || null;
-  const frames = await Promise.all(
-    Array.from({ length: count }, (_, i) => {
+  const frames = new Array(count);
+  const prefetch = Math.min(8, count);
+  await Promise.all(
+    Array.from({ length: prefetch }, async (_, i) => {
       const n = String(i + 1).padStart(4, '0');
-      const img = new Image();
-      img.src = `${base}/frame_${n}.webp`;
-      return new Promise((resolve, reject) => {
-        img.onload = () => resolve(img);
-        img.onerror = () => reject(new Error(`failed ${key} frame ${n}`));
-      });
+      frames[i] = await loadOneFrame(`${base}/frame_${n}.webp`);
     }),
   );
-  const pack = { frames, fps, boardRect };
+  const pack = { frames, fps, boardRect, base, count };
   videoCache.set(key, pack);
+  void fillRemainingFrames(pack);
   return pack;
 }
 
-function wrapLines(ctx, text, maxWidth) {
+async function fillRemainingFrames(pack) {
+  const { frames, base, count } = pack;
+  for (let i = 0; i < count; i++) {
+    if (frames[i]) continue;
+    const n = String(i + 1).padStart(4, '0');
+    try {
+      frames[i] = await loadOneFrame(`${base}/frame_${n}.webp`);
+    } catch (err) {
+      console.warn(err);
+    }
+  }
+}
+
+async function ensureFrame(pack, index) {
+  if (pack.frames[index]) return pack.frames[index];
+  const n = String(index + 1).padStart(4, '0');
+  const img = await loadOneFrame(`${pack.base}/frame_${n}.webp`);
+  pack.frames[index] = img;
+  return img;
+}
+
+function wrapLines(measureCtx, text, maxWidth) {
   const words = String(text || '').split(/\s+/).filter(Boolean);
   if (!words.length) return [];
-  // Prefer unbroken URL on one shrinking line when no spaces.
   if (words.length === 1) return [words[0]];
   const lines = [];
   let line = '';
   for (const w of words) {
     const test = line ? `${line} ${w}` : w;
-    if (ctx.measureText(test).width > maxWidth && line) {
+    if (measureCtx.measureText(test).width > maxWidth && line) {
       lines.push(line);
       line = w;
     } else {
@@ -162,7 +200,6 @@ function drawBoardText(text, boardRect, canvasW, canvasH) {
   }
   ctx.font = `bold ${size}px Segoe UI, Arial, sans-serif`;
   lines = wrapLines(ctx, msg, innerW);
-  // Hard-cap lines that still overflow (e.g. long URL): clip via canvas clip already.
   const lineH = size * 1.15;
   const blockH = lines.length * lineH;
   let cy = y + pad + (innerH - blockH) / 2 + lineH / 2;
@@ -174,37 +211,48 @@ function drawBoardText(text, boardRect, canvasW, canvasH) {
   ctx.restore();
 }
 
-function playVideoFrames(frames, fps, opts = {}) {
+function playVideoPack(pack, opts = {}) {
   const { boardRect = null, boardText = '' } = opts;
+  const count = pack.count || pack.frames.length;
   return new Promise((resolve) => {
-    if (!frames.length) {
+    if (!count) {
       resolve();
       return;
     }
-    // Full video frames (keyed only). Left edge pinned by #video-container.
-    const W = frames[0].naturalWidth;
-    const H = frames[0].naturalHeight;
+    const first = pack.frames[0];
+    const W = first.naturalWidth;
+    const H = first.naturalHeight;
     canvas.width = W;
     canvas.height = H;
     canvas.style.width = `${W}px`;
     canvas.style.height = `${H}px`;
-    const frameMs = Math.max(16, Math.round(1000 / fps));
+    const frameMs = Math.max(16, Math.round(1000 / pack.fps));
     const textStart = boardRect && boardText
-      ? Math.max(0, Math.floor(frames.length * 0.75))
-      : frames.length;
+      ? Math.max(0, Math.floor(count * 0.75))
+      : count;
     let index = 0;
-    const step = () => {
+
+    const step = async () => {
       if (state !== 'playing') {
         resolve();
         return;
       }
-      ctx.clearRect(0, 0, W, H);
-      ctx.drawImage(frames[index], 0, 0);
-      if (index >= textStart) {
-        drawBoardText(boardText, boardRect, W, H);
+      try {
+        const img = await ensureFrame(pack, index);
+        // Prefetch a few ahead
+        for (let j = index + 1; j < Math.min(count, index + 6); j++) {
+          if (!pack.frames[j]) void ensureFrame(pack, j);
+        }
+        ctx.clearRect(0, 0, W, H);
+        ctx.drawImage(img, 0, 0);
+        if (index >= textStart) {
+          drawBoardText(boardText, boardRect, W, H);
+        }
+      } catch (err) {
+        console.error('frame play error', err);
       }
       index += 1;
-      if (index >= frames.length) {
+      if (index >= count) {
         resolve();
         return;
       }
@@ -215,16 +263,24 @@ function playVideoFrames(frames, fps, opts = {}) {
 }
 
 async function init() {
-  await loadCatalog();
+  // Register listener before any heavy work so cold-start emits are not dropped.
   await listen('reminder-fire', (e) => showReminder(e.payload || {}));
   yesBtn.addEventListener('click', dismissOverlay);
   doneBtn.addEventListener('click', dismissOverlay);
   noBtn.addEventListener('click', onNo);
+  try {
+    await invoke('overlay_ready');
+  } catch (err) {
+    console.warn('overlay_ready', err);
+  }
+  void loadCatalog();
 }
 
 async function showReminder(payload) {
   if (state !== 'hidden') return;
   state = 'playing';
+  if (!catalog) await loadCatalog();
+
   activeReminder = {
     id: payload.id || null,
     character: payload.character || 'water-guy',
@@ -247,7 +303,13 @@ async function showReminder(payload) {
   doneBtn.style.display = 'none';
   clearCanvas();
   clearTimers();
-  disposeCharacter3d();
+  if (character3d) {
+    try {
+      character3d.disposeCharacter3d();
+    } catch (_) {
+      /* ignore */
+    }
+  }
 
   await invoke('set_overlay_clickthrough', { enabled: true });
   document.body.classList.remove('hidden');
@@ -259,16 +321,17 @@ async function showReminder(payload) {
   const meta = characterMeta(activeReminder.character);
   try {
     if (meta.type === 'model') {
+      const mod = await ensureCharacter3d();
       try {
-        await playModelCharacter(canvas, {
+        await mod.playModelCharacter(canvas, {
           character: activeReminder.character,
           action: activeReminder.action,
           boardText: activeReminder.boardText,
         });
       } catch (err) {
         console.warn('WebGL path failed, retrying offscreen', err);
-        forceOffscreenFallback();
-        await playModelCharacter(canvas, {
+        mod.forceOffscreenFallback();
+        await mod.playModelCharacter(canvas, {
           character: activeReminder.character,
           action: activeReminder.action,
           boardText: activeReminder.boardText,
@@ -276,7 +339,7 @@ async function showReminder(payload) {
       }
     } else {
       const pack = await loadVideoFrames(activeReminder.character, activeReminder.action);
-      await playVideoFrames(pack.frames, pack.fps, {
+      await playVideoPack(pack, {
         boardRect: pack.boardRect,
         boardText: activeReminder.action === 'board' ? activeReminder.boardText : '',
       });
@@ -312,7 +375,13 @@ async function dismissOverlay() {
   state = 'hidden';
   strip.classList.remove('visible');
   clearCanvas();
-  disposeCharacter3d();
+  if (character3d) {
+    try {
+      character3d.disposeCharacter3d();
+    } catch (_) {
+      /* ignore */
+    }
+  }
 
   const id = activeReminder?.id || null;
   activeReminder = null;

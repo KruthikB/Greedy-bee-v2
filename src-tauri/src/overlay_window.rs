@@ -24,7 +24,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         }
         let overlay_physical_h = 370u32; // 300 video + 70 button strip
 
-        WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App("overlay/index.html".into()))
+        let window = WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App("overlay/index.html".into()))
             .title("")
             .transparent(true)
             .decorations(false)
@@ -39,11 +39,14 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
             )
             .inner_size(work_w as f64 / scale, overlay_physical_h as f64 / scale)
             .build()?;
+
+        // Click-through until the reminder UI asks for buttons.
+        crate::platform::set_clickthrough(&window, true);
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App("overlay/index.html".into()))
+        let window = WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App("overlay/index.html".into()))
             .title("")
             .transparent(true)
             .decorations(false)
@@ -51,6 +54,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
             .skip_taskbar(true)
             .visible(true)
             .build()?;
+        crate::platform::set_clickthrough(&window, true);
     }
 
     Ok(())

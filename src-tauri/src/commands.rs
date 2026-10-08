@@ -2,7 +2,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
 use crate::config::{self, Reminder, MAX_REMINDERS};
-use crate::{overlay_window, scheduler, AppState};
+use crate::{scheduler, AppState};
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -135,6 +135,7 @@ pub fn delete_reminder(id: String, state: State<'_, AppState>, app: AppHandle) -
     s.queue.retain(|q| q != &id);
     if s.active_id.as_deref() == Some(id.as_str()) {
         s.active_id = None;
+        s.active_since = None;
     }
     let cfg = s.to_config();
     drop(s);
@@ -196,12 +197,20 @@ pub fn dismiss_overlay(id: Option<String>, state: State<'_, AppState>, app: AppH
         if let Some(id) = active {
             scheduler::on_dismiss(&state.scheduler, &id, &app);
         } else {
-            state.scheduler.lock().unwrap().active_id = None;
+            let mut s = state.scheduler.lock().unwrap();
+            s.active_id = None;
+            s.active_since = None;
         }
     }
-    // Destroy overlay to stop WebView2 compositing while idle.
-    overlay_window::destroy(&app);
+    // Keep the overlay WebView alive so the next fire does not race cold start.
     let _ = app.emit("overlay-dismissed", ());
+}
+
+#[tauri::command]
+pub fn overlay_ready(state: State<'_, AppState>) {
+    if let Ok(mut ready) = state.overlay_ready.lock() {
+        *ready = true;
+    }
 }
 
 #[tauri::command]
