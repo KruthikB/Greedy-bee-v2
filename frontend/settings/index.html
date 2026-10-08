@@ -7,6 +7,21 @@
   <link rel="stylesheet" href="settings.css" />
 </head>
 <body>
+  <!-- Busy backdrop so liquid glass can refract / frost something visible -->
+  <div class="bg-orbs" aria-hidden="true">
+    <span class="orb orb-a"></span>
+    <span class="orb orb-b"></span>
+    <span class="orb orb-c"></span>
+  </div>
+
+  <svg width="0" height="0" aria-hidden="true" style="position:absolute">
+    <filter id="lg-refract" x="-20%" y="-20%" width="140%" height="140%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.008 0.012" numOctaves="2" seed="9" result="n"/>
+      <feGaussianBlur in="n" stdDeviation="1.4" result="s"/>
+      <feDisplacementMap in="SourceGraphic" in2="s" scale="28" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+  </svg>
+
   <div class="app">
 
     <header>
@@ -15,12 +30,12 @@
       <div class="tagline">Custom reminders with character popups</div>
     </header>
 
-    <div class="card">
+    <div class="card liquid-glass">
       <div id="status-badge" class="badge badge-running">● Running</div>
       <div id="countdown-label" class="countdown">Next reminder in —:——</div>
     </div>
 
-    <div class="card">
+    <div class="card liquid-glass">
       <div class="row between">
         <label class="section-label">Reminders</label>
         <button id="add-btn" class="btn btn-primary">+ Add</button>
@@ -29,7 +44,7 @@
       <div id="reminder-cap" class="hint">Up to 10 reminders</div>
     </div>
 
-    <div id="editor-card" class="card editor hidden">
+    <div id="editor-card" class="card liquid-glass editor hidden">
       <label class="section-label" id="editor-title">Edit reminder</label>
       <input type="hidden" id="edit-id" />
 
@@ -101,7 +116,7 @@
       <div id="editor-error" class="error"></div>
     </div>
 
-    <div class="card">
+    <div class="card liquid-glass">
       <label class="section-label">Pause all reminders</label>
       <div class="row wrap">
         <button class="btn btn-secondary" data-pause="30">30 min</button>
@@ -112,7 +127,7 @@
       <button id="resume-btn" class="btn btn-accent" disabled>Resume Now</button>
     </div>
 
-    <div class="card actions-row">
+    <div class="card liquid-glass actions-row">
       <button id="quit-btn" class="btn btn-danger">Quit Greedy Bee</button>
     </div>
 
