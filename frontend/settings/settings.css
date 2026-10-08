@@ -175,6 +175,23 @@ header { text-align: center; padding-bottom: 2px; }
   font-variant-numeric: tabular-nums;
 }
 
+.size-row {
+  align-items: center;
+}
+.size-row input[type="range"] {
+  flex: 1;
+  width: auto;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.size-value {
+  min-width: 44px;
+  text-align: right;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-deep);
+}
+
 .row {
   display: flex;
   align-items: center;

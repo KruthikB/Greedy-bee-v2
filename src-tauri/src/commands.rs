@@ -19,6 +19,7 @@ pub struct ReminderStatus {
     pub schedule_summary: String,
     pub next_fire: Option<String>,
     pub remaining_secs: Option<u64>,
+    pub queued: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -29,13 +30,20 @@ pub struct StatusPayload {
     pub remaining_reminder_secs: u64,
     pub next_reminder_name: Option<String>,
     pub active_reminder_id: Option<String>,
+    pub character_size: u32,
     pub reminders: Vec<ReminderStatus>,
 }
 
-fn reminder_status(rt: &scheduler::ReminderRuntime, is_paused: bool) -> ReminderStatus {
+fn reminder_status(
+    rt: &scheduler::ReminderRuntime,
+    is_paused: bool,
+    queued: bool,
+) -> ReminderStatus {
     let now = chrono::Local::now();
     // While paused, report the frozen snapshot so countdowns do not keep ticking.
-    let remaining_secs = if is_paused {
+    let remaining_secs = if queued {
+        None
+    } else if is_paused {
         rt.paused_remaining
             .map(|d| d.num_seconds().max(0) as u64)
             .or_else(|| {
@@ -69,6 +77,7 @@ fn reminder_status(rt: &scheduler::ReminderRuntime, is_paused: bool) -> Reminder
         schedule_summary: config::schedule_summary(&rt.reminder.schedule),
         next_fire: config::format_next_fire(rt.next_fire),
         remaining_secs,
+        queued,
     }
 }
 
@@ -83,10 +92,11 @@ pub fn get_status(state: State<'_, AppState>) -> StatusPayload {
         remaining_reminder_secs: s.remaining_until_next_secs(),
         next_reminder_name: next.map(|(n, _)| n),
         active_reminder_id: s.active_id.clone(),
+        character_size: s.character_size,
         reminders: s
             .reminders
             .iter()
-            .map(|r| reminder_status(r, is_paused))
+            .map(|r| reminder_status(r, is_paused, s.queue.contains(&r.reminder.id)))
             .collect(),
     }
 }
@@ -97,8 +107,24 @@ pub fn list_reminders(state: State<'_, AppState>) -> Vec<ReminderStatus> {
     let is_paused = s.is_paused;
     s.reminders
         .iter()
-        .map(|r| reminder_status(r, is_paused))
+        .map(|r| reminder_status(r, is_paused, s.queue.contains(&r.reminder.id)))
         .collect()
+}
+
+#[tauri::command]
+pub fn set_character_size(
+    size: u32,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<u32, String> {
+    let size = config::clamp_character_size(size);
+    let mut s = state.scheduler.lock().unwrap();
+    s.character_size = size;
+    let cfg = s.to_config();
+    drop(s);
+    config::save(&app, &cfg);
+    let _ = app.emit("character-size-changed", size);
+    Ok(size)
 }
 
 #[tauri::command]
@@ -143,7 +169,8 @@ pub fn save_reminder(
         s.reminders.push(runtime);
     }
 
-    let status = reminder_status(s.find(&reminder.id).unwrap(), s.is_paused);
+    let queued = s.queue.contains(&reminder.id);
+    let status = reminder_status(s.find(&reminder.id).unwrap(), s.is_paused, queued);
     let cfg = s.to_config();
     drop(s);
     config::save(&app, &cfg);

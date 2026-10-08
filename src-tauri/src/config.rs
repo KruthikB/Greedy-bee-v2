@@ -18,15 +18,31 @@ fn is_board_link(s: &str) -> bool {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Config {
     #[serde(default = "default_version")]
     pub version: u32,
     #[serde(default)]
     pub reminders: Vec<Reminder>,
+    /// Display height of the character as a percent of the overlay slot (30–100).
+    /// Aspect ratio is always preserved.
+    #[serde(default = "default_character_size")]
+    pub character_size: u32,
 }
 
 fn default_version() -> u32 {
     2
+}
+
+fn default_character_size() -> u32 {
+    55
+}
+
+pub const MIN_CHARACTER_SIZE: u32 = 30;
+pub const MAX_CHARACTER_SIZE: u32 = 100;
+
+pub fn clamp_character_size(size: u32) -> u32 {
+    size.clamp(MIN_CHARACTER_SIZE, MAX_CHARACTER_SIZE)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,6 +84,7 @@ impl Default for Config {
         Self {
             version: 2,
             reminders: vec![default_water_reminder(15)],
+            character_size: default_character_size(),
         }
     }
 }
@@ -112,6 +129,7 @@ pub fn load(app: &tauri::AppHandle) -> Config {
         let cfg = Config {
             version: 2,
             reminders: vec![default_water_reminder(legacy.reminder_interval_minutes)],
+            character_size: default_character_size(),
         };
         save(app, &cfg);
         return cfg;

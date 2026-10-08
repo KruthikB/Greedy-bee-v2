@@ -14,6 +14,8 @@ const quitBtn = document.getElementById('quit-btn');
 const editorCard = document.getElementById('editor-card');
 const editorError = document.getElementById('editor-error');
 const aboutCredits = document.getElementById('about-credits');
+const characterSizeInput = document.getElementById('character-size');
+const characterSizeLabel = document.getElementById('character-size-label');
 
 let catalog = { characters: [], sharedActions: [] };
 let reminders = [];
@@ -21,6 +23,8 @@ let activeReminderId = null;
 let isPaused = false;
 let formOpen = false;
 let lastListKey = '';
+let characterSize = 55;
+let sizeSaveTimer = 0;
 const openIds = new Set();
 
 function isBoardLink(s) {
@@ -70,6 +74,21 @@ async function init() {
       `${document.getElementById('edit-message').value.length}/80`;
   });
   document.getElementById('edit-board').addEventListener('input', updateBoardCounter);
+
+  characterSizeInput.addEventListener('input', () => {
+    characterSize = Number(characterSizeInput.value) || 55;
+    characterSizeLabel.textContent = `${characterSize}%`;
+    if (sizeSaveTimer) clearTimeout(sizeSaveTimer);
+    sizeSaveTimer = setTimeout(async () => {
+      try {
+        characterSize = await invoke('set_character_size', { size: characterSize });
+        characterSizeInput.value = String(characterSize);
+        characterSizeLabel.textContent = `${characterSize}%`;
+      } catch (err) {
+        console.warn('set_character_size', err);
+      }
+    }, 200);
+  });
 }
 
 async function loadCatalog() {
@@ -97,6 +116,7 @@ function remainingOf(r) {
 function timerLabel(r) {
   if (!r.enabled) return { text: 'Off', cls: 'disabled' };
   if (activeReminderId && r.id === activeReminderId) return { text: 'Now', cls: 'due' };
+  if (r.queued) return { text: 'Queued', cls: 'due' };
   const secs = remainingOf(r);
   if (secs == null) return { text: '—', cls: 'disabled' };
   if (!isPaused && secs <= 0) return { text: 'Due', cls: 'due' };
@@ -117,6 +137,12 @@ async function refreshStatus() {
   const pauseSecs = s.remainingPauseSecs ?? s.remaining_pause_secs ?? 0;
   const nextSecs = s.remainingReminderSecs ?? s.remaining_reminder_secs ?? 0;
   const nextName = s.nextReminderName ?? s.next_reminder_name ?? null;
+  const size = s.characterSize ?? s.character_size;
+  if (size != null && Number(size) !== characterSize) {
+    characterSize = Number(size);
+    characterSizeInput.value = String(characterSize);
+    characterSizeLabel.textContent = `${characterSize}%`;
+  }
   addBtn.disabled = reminders.length >= 10;
 
   if (isPaused) {
@@ -157,6 +183,8 @@ async function refreshStatus() {
       r.character,
       r.action,
       isPaused,
+      !!r.queued,
+      activeReminderId,
     ]),
   );
   if (!formOpen && listKey !== lastListKey) {

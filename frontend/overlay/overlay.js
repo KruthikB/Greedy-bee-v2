@@ -17,6 +17,8 @@ let paintTimer = 0;
 let safetyTimer = 0;
 let catalog = null;
 let character3d = null; // lazy-loaded only for model packs
+let characterSize = 55; // percent of video slot height; aspect ratio preserved
+let holdFrame = null; // last bitmap + board text to keep until ack
 
 function clearTimers() {
   if (paintTimer) {
@@ -31,6 +33,15 @@ function clearTimers() {
 
 function clearCanvas() {
   ctx.clearRect(0, 0, canvas.width || 1, canvas.height || 1);
+}
+
+function applyCharacterSize(percent) {
+  const p = Math.max(30, Math.min(100, Math.round(Number(percent) || 55)));
+  characterSize = p;
+  canvas.style.height = `${p}%`;
+  canvas.style.maxHeight = `${p}%`;
+  canvas.style.width = 'auto';
+  canvas.style.maxWidth = 'min(720px, 70%)';
 }
 
 async function loadCatalog() {
@@ -102,7 +113,6 @@ async function loadVideoFrames(character, action) {
       count,
     };
     videoCache.set(key, pack);
-    // Background-load the rest
     void fillRemainingFrames(pack);
     return pack;
   }
@@ -211,6 +221,19 @@ function drawBoardText(text, boardRect, canvasW, canvasH) {
   ctx.restore();
 }
 
+function paintHoldFrame() {
+  if (!holdFrame) return;
+  const { img, boardRect, boardText, W, H } = holdFrame;
+  canvas.width = W;
+  canvas.height = H;
+  applyCharacterSize(characterSize);
+  ctx.clearRect(0, 0, W, H);
+  ctx.drawImage(img, 0, 0);
+  if (boardText && boardRect) {
+    drawBoardText(boardText, boardRect, W, H);
+  }
+}
+
 function playVideoPack(pack, opts = {}) {
   const { boardRect = null, boardText = '' } = opts;
   const count = pack.count || pack.frames.length;
@@ -224,10 +247,7 @@ function playVideoPack(pack, opts = {}) {
     const H = first.naturalHeight;
     canvas.width = W;
     canvas.height = H;
-    // Fill the video slot; CSS max-height:100% keeps the full frame (no head crop).
-    canvas.style.width = 'auto';
-    canvas.style.height = '100%';
-    canvas.style.maxHeight = '100%';
+    applyCharacterSize(characterSize);
     const frameMs = Math.max(16, Math.round(1000 / pack.fps));
     const textStart = boardRect && boardText
       ? Math.max(0, Math.floor(count * 0.75))
@@ -241,20 +261,33 @@ function playVideoPack(pack, opts = {}) {
       }
       try {
         const img = await ensureFrame(pack, index);
-        // Prefetch a few ahead
         for (let j = index + 1; j < Math.min(count, index + 6); j++) {
           if (!pack.frames[j]) void ensureFrame(pack, j);
         }
         ctx.clearRect(0, 0, W, H);
         ctx.drawImage(img, 0, 0);
-        if (index >= textStart) {
+        const showText = index >= textStart;
+        if (showText) {
           drawBoardText(boardText, boardRect, W, H);
         }
+        holdFrame = {
+          img,
+          boardRect: showText ? boardRect : null,
+          boardText: showText ? boardText : '',
+          W,
+          H,
+        };
       } catch (err) {
         console.error('frame play error', err);
       }
       index += 1;
       if (index >= count) {
+        // Keep the final pose + board text until the user answers.
+        if (holdFrame && boardText && boardRect) {
+          holdFrame.boardRect = boardRect;
+          holdFrame.boardText = boardText;
+          paintHoldFrame();
+        }
         resolve();
         return;
       }
@@ -265,11 +298,21 @@ function playVideoPack(pack, opts = {}) {
 }
 
 async function init() {
-  // Register listener before any heavy work so cold-start emits are not dropped.
+  applyCharacterSize(characterSize);
   await listen('reminder-fire', (e) => showReminder(e.payload || {}));
+  await listen('character-size-changed', (e) => {
+    applyCharacterSize(e.payload);
+    if (state !== 'hidden') paintHoldFrame();
+  });
   yesBtn.addEventListener('click', dismissOverlay);
   doneBtn.addEventListener('click', dismissOverlay);
   noBtn.addEventListener('click', onNo);
+  try {
+    const status = await invoke('get_status');
+    applyCharacterSize(status.characterSize ?? status.character_size ?? characterSize);
+  } catch (_) {
+    /* ignore */
+  }
   try {
     await invoke('overlay_ready');
   } catch (err) {
@@ -279,9 +322,12 @@ async function init() {
 }
 
 async function showReminder(payload) {
+  // One character at a time — ignore fires while another is still on screen.
   if (state !== 'hidden') return;
   state = 'playing';
   if (!catalog) await loadCatalog();
+
+  applyCharacterSize(payload.characterSize ?? payload.character_size ?? characterSize);
 
   activeReminder = {
     id: payload.id || null,
@@ -294,6 +340,7 @@ async function showReminder(payload) {
       payload.not_yet_message ||
       'Drink Now! Get up and drink a glass of water.',
   };
+  holdFrame = null;
 
   strip.classList.remove('visible');
   questionLbl.textContent = `💧  ${activeReminder.message}`;
@@ -316,9 +363,10 @@ async function showReminder(payload) {
   await invoke('set_overlay_clickthrough', { enabled: true });
   document.body.classList.remove('hidden');
 
+  // Only unblock the asking UI if playback stalls — never auto-dismiss.
   safetyTimer = setTimeout(() => {
     if (state === 'playing') onAnimationEnded();
-  }, 14000);
+  }, 20000);
 
   const meta = characterMeta(activeReminder.character);
   try {
@@ -356,6 +404,7 @@ async function onAnimationEnded() {
   if (state !== 'playing') return;
   state = 'asking';
   clearTimers();
+  paintHoldFrame();
   await invoke('set_overlay_clickthrough', { enabled: false });
   strip.classList.add('visible');
 }
@@ -367,6 +416,7 @@ function onNo() {
   noBtn.style.display = 'none';
   drinkNowLbl.style.display = 'block';
   doneBtn.style.display = 'block';
+  paintHoldFrame();
 }
 
 async function dismissOverlay() {
@@ -376,6 +426,7 @@ async function dismissOverlay() {
   clearTimers();
   state = 'hidden';
   strip.classList.remove('visible');
+  holdFrame = null;
   clearCanvas();
   if (character3d) {
     try {
