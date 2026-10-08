@@ -14,6 +14,8 @@ pub struct SchedulerState {
     pub active_id: Option<String>,
     /// When the current overlay fire started (for stuck-active recovery).
     pub active_since: Option<Instant>,
+    /// Character display height percent (aspect ratio preserved).
+    pub character_size: u32,
 }
 
 pub struct ReminderRuntime {
@@ -49,6 +51,7 @@ impl SchedulerState {
             queue: VecDeque::new(),
             active_id: None,
             active_since: None,
+            character_size: config::clamp_character_size(cfg.character_size),
         }
     }
 
@@ -124,6 +127,7 @@ impl SchedulerState {
         Config {
             version: 2,
             reminders: self.reminders.iter().map(|r| r.reminder.clone()).collect(),
+            character_size: self.character_size,
         }
     }
 
@@ -152,6 +156,19 @@ pub struct ReminderFirePayload {
     pub message: String,
     pub board_text: Option<String>,
     pub not_yet_message: String,
+    pub character_size: u32,
+}
+
+fn fire_payload(rt: &ReminderRuntime, character_size: u32) -> ReminderFirePayload {
+    ReminderFirePayload {
+        id: rt.reminder.id.clone(),
+        character: rt.reminder.character.clone(),
+        action: rt.reminder.action.clone(),
+        message: rt.reminder.message.clone(),
+        board_text: rt.reminder.board_text.clone(),
+        not_yet_message: rt.reminder.not_yet_message.clone(),
+        character_size,
+    }
 }
 
 pub async fn run_loop(state: Arc<Mutex<SchedulerState>>, app: AppHandle) {
@@ -212,29 +229,22 @@ pub async fn run_loop(state: Arc<Mutex<SchedulerState>>, app: AppHandle) {
                 }
             }
 
-            // Recover if overlay never showed / user never dismissed.
+            // Never auto-dismiss while the user still needs to answer.
+            // Only clear a stuck active_id if the overlay window itself is gone.
             if let (Some(_), Some(since)) = (&s.active_id, s.active_since) {
-                if now_instant.duration_since(since) > Duration::from_secs(20) {
-                    eprintln!("Greedy Bee: clearing stuck overlay active_id after 20s");
+                if app.get_webview_window("overlay").is_none()
+                    && now_instant.duration_since(since) > Duration::from_secs(45)
+                {
+                    eprintln!("Greedy Bee: clearing orphaned active_id (overlay window missing)");
                     s.active_id = None;
                     s.active_since = None;
-                    if let Some(overlay) = app.get_webview_window("overlay") {
-                        let _ = overlay.hide();
-                    }
                 }
             }
 
             if s.active_id.is_none() {
                 if let Some(next_id) = s.queue.pop_front() {
                     if let Some(rt) = s.find(&next_id) {
-                        let payload = ReminderFirePayload {
-                            id: rt.reminder.id.clone(),
-                            character: rt.reminder.character.clone(),
-                            action: rt.reminder.action.clone(),
-                            message: rt.reminder.message.clone(),
-                            board_text: rt.reminder.board_text.clone(),
-                            not_yet_message: rt.reminder.not_yet_message.clone(),
-                        };
+                        let payload = fire_payload(rt, s.character_size);
                         s.active_id = Some(next_id);
                         s.active_since = Some(Instant::now());
                         drop(s);
@@ -350,14 +360,7 @@ fn try_fire_next(state: &Arc<Mutex<SchedulerState>>, app: &AppHandle) {
     }
     if let Some(next_id) = s.queue.pop_front() {
         if let Some(rt) = s.find(&next_id) {
-            let payload = ReminderFirePayload {
-                id: rt.reminder.id.clone(),
-                character: rt.reminder.character.clone(),
-                action: rt.reminder.action.clone(),
-                message: rt.reminder.message.clone(),
-                board_text: rt.reminder.board_text.clone(),
-                not_yet_message: rt.reminder.not_yet_message.clone(),
-            };
+            let payload = fire_payload(rt, s.character_size);
             s.active_id = Some(next_id);
             s.active_since = Some(Instant::now());
             drop(s);
@@ -436,11 +439,13 @@ pub fn test_reminder(state: &Arc<Mutex<SchedulerState>>, id: Option<&str>, app: 
         return;
     };
     if s.active_id.is_some() {
+        // Another character is on screen — wait until it is acknowledged.
         if !s.queue.contains(&reminder.id) {
             s.queue.push_back(reminder.id.clone());
         }
         return;
     }
+    let size = s.character_size;
     let payload = ReminderFirePayload {
         id: reminder.id.clone(),
         character: reminder.character.clone(),
@@ -448,6 +453,7 @@ pub fn test_reminder(state: &Arc<Mutex<SchedulerState>>, id: Option<&str>, app: 
         message: reminder.message.clone(),
         board_text: reminder.board_text.clone(),
         not_yet_message: reminder.not_yet_message.clone(),
+        character_size: size,
     };
     s.active_id = Some(reminder.id);
     s.active_since = Some(Instant::now());

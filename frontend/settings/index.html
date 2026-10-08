@@ -36,12 +36,21 @@
     </div>
 
     <div class="card liquid-glass">
+      <label class="section-label">Character size</label>
+      <div class="row size-row">
+        <input id="character-size" type="range" min="30" max="100" step="5" value="55" />
+        <span id="character-size-label" class="size-value">55%</span>
+      </div>
+      <div class="hint">Aspect ratio stays the same. Smaller sizes look sharper.</div>
+    </div>
+
+    <div class="card liquid-glass">
       <div class="row between">
         <label class="section-label">Reminders</label>
         <button id="add-btn" class="btn btn-primary">+ Add</button>
       </div>
       <div id="reminder-list" class="reminder-list"></div>
-      <div id="reminder-cap" class="hint">Up to 10 reminders</div>
+      <div id="reminder-cap" class="hint">Up to 10 reminders · only one character shows at a time</div>
     </div>
 
     <div id="editor-card" class="card liquid-glass editor hidden">

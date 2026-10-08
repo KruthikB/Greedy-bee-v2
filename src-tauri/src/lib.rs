@@ -108,6 +108,7 @@ pub fn run() {
             commands::dismiss_overlay,
             commands::overlay_ready,
             commands::set_overlay_clickthrough,
+            commands::set_character_size,
             commands::quit_app,
         ])
         .run(tauri::generate_context!())
