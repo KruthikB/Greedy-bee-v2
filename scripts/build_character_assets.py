@@ -19,6 +19,35 @@ from pathlib import Path
 # Reuse keying from the extract script
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from extract_character_frames import extract_keyed_frames  # noqa: E402
+from PIL import Image  # noqa: E402
+
+
+def install_pack_thumb(
+    pack_dir: Path,
+    out_pack: Path,
+    cid: str,
+    last_by_action: dict[str, Path],
+) -> str | None:
+    """Prefer authored cover.* art; else last drink frame."""
+    for name in ("cover.jpg", "cover.jpeg", "cover.png", "cover.webp"):
+        cover = pack_dir / name
+        if not cover.is_file():
+            continue
+        shutil.copy2(cover, out_pack / cover.name)
+        thumb_dst = out_pack / "thumb.webp"
+        img = Image.open(cover).convert("RGB")
+        img.thumbnail((256, 256), Image.Resampling.LANCZOS)
+        img.save(thumb_dst, "WEBP", quality=88)
+        print(f"  thumb -> {cid}/thumb.webp (from {name})")
+        return f"{cid}/thumb.webp"
+
+    if last_by_action:
+        thumb_src = last_by_action.get("drink") or next(iter(last_by_action.values()))
+        thumb_dst = out_pack / "thumb.webp"
+        shutil.copy2(thumb_src, thumb_dst)
+        print(f"  thumb -> {cid}/thumb.webp (last frame)")
+        return f"{cid}/thumb.webp"
+    return None
 
 
 def extract_video_action(
@@ -106,13 +135,8 @@ def build_pack(pack_dir: Path, out_root: Path) -> dict | None:
         return None
 
     thumb_rel = None
-    if ctype == "video" and last_by_action:
-        # Prefer drink last frame as cover thumbnail.
-        thumb_src = last_by_action.get("drink") or next(iter(last_by_action.values()))
-        thumb_dst = out_pack / "thumb.webp"
-        shutil.copy2(thumb_src, thumb_dst)
-        thumb_rel = f"{cid}/thumb.webp"
-        print(f"  thumb -> {thumb_rel}")
+    if ctype == "video":
+        thumb_rel = install_pack_thumb(pack_dir, out_pack, cid, last_by_action)
 
     entry = {
         "id": cid,

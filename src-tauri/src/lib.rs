@@ -10,6 +10,8 @@ pub mod tray;
 
 pub struct AppState {
     pub scheduler: Arc<Mutex<scheduler::SchedulerState>>,
+    /// True once the overlay page has registered its reminder-fire listener.
+    pub overlay_ready: Arc<Mutex<bool>>,
 }
 
 pub fn run() {
@@ -29,6 +31,7 @@ pub fn run() {
 
             app.manage(AppState {
                 scheduler: scheduler_state.clone(),
+                overlay_ready: Arc::new(Mutex::new(false)),
             });
 
             // Overlay is created on demand when a reminder fires (see overlay_window).
@@ -103,6 +106,7 @@ pub fn run() {
             commands::resume_reminders,
             commands::test_reminder,
             commands::dismiss_overlay,
+            commands::overlay_ready,
             commands::set_overlay_clickthrough,
             commands::quit_app,
         ])
