@@ -17,8 +17,11 @@ const aboutCredits = document.getElementById('about-credits');
 
 let catalog = { characters: [], sharedActions: [] };
 let reminders = [];
+let activeReminderId = null;
+let isPaused = false;
 let formOpen = false;
 let lastListKey = '';
+const openIds = new Set();
 
 function isBoardLink(s) {
   const t = String(s || '').trim().toLowerCase();
@@ -43,13 +46,20 @@ async function init() {
   addBtn.addEventListener('click', () => openEditor(null));
   document.getElementById('save-btn').addEventListener('click', saveEditor);
   document.getElementById('cancel-btn').addEventListener('click', closeEditor);
-  resumeBtn.addEventListener('click', () => invoke('resume_reminders'));
+  resumeBtn.addEventListener('click', async () => {
+    await invoke('resume_reminders');
+    await refreshStatus();
+  });
   quitBtn.addEventListener('click', () => invoke('quit_app'));
 
   document.querySelectorAll('[data-pause]').forEach((btn) => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const mins = parseInt(btn.dataset.pause, 10);
-      invoke('pause_reminders', { durationMinutes: mins === 0 ? null : mins });
+      // null = pause indefinitely; preserve each reminder's remaining delta on resume
+      await invoke('pause_reminders', {
+        durationMinutes: Number.isFinite(mins) && mins > 0 ? mins : null,
+      });
+      await refreshStatus();
     });
   });
 
@@ -79,6 +89,20 @@ async function loadCatalog() {
   aboutCredits.textContent = credits ? `Characters: ${credits}` : aboutCredits.textContent;
 }
 
+function remainingOf(r) {
+  const v = r.remainingSecs ?? r.remaining_secs;
+  return v == null ? null : Number(v);
+}
+
+function timerLabel(r) {
+  if (!r.enabled) return { text: 'Off', cls: 'disabled' };
+  if (activeReminderId && r.id === activeReminderId) return { text: 'Now', cls: 'due' };
+  const secs = remainingOf(r);
+  if (secs == null) return { text: '—', cls: 'disabled' };
+  if (!isPaused && secs <= 0) return { text: 'Due', cls: 'due' };
+  return { text: fmt(secs), cls: '' };
+}
+
 async function refreshStatus() {
   let s;
   try {
@@ -88,32 +112,72 @@ async function refreshStatus() {
   }
 
   reminders = s.reminders || [];
+  activeReminderId = s.activeReminderId ?? s.active_reminder_id ?? null;
+  isPaused = !!(s.isPaused ?? s.is_paused);
+  const pauseSecs = s.remainingPauseSecs ?? s.remaining_pause_secs ?? 0;
+  const nextSecs = s.remainingReminderSecs ?? s.remaining_reminder_secs ?? 0;
+  const nextName = s.nextReminderName ?? s.next_reminder_name ?? null;
   addBtn.disabled = reminders.length >= 10;
 
-  if (s.is_paused) {
+  if (isPaused) {
     statusBadge.textContent = '⏸  Paused';
     statusBadge.className = 'badge badge-paused';
     countdownLbl.textContent =
-      s.remaining_pause_secs < 0
-        ? 'Paused indefinitely — click Resume to restart'
-        : `Resuming in  ${fmt(s.remaining_pause_secs)}`;
+      pauseSecs < 0
+        ? 'Paused indefinitely — timers frozen'
+        : `Paused · resumes in ${fmt(pauseSecs)}`;
     resumeBtn.disabled = false;
+  } else if (activeReminderId) {
+    statusBadge.textContent = '●  Running';
+    statusBadge.className = 'badge badge-running';
+    const active = reminders.find((r) => r.id === activeReminderId);
+    if (nextName && nextSecs > 0) {
+      countdownLbl.textContent = `Showing ${active?.name || 'reminder'} · next ${nextName} in ${fmt(nextSecs)}`;
+    } else {
+      countdownLbl.textContent = `Showing ${active?.name || 'reminder'}…`;
+    }
+    resumeBtn.disabled = true;
   } else {
     statusBadge.textContent = '●  Running';
     statusBadge.className = 'badge badge-running';
-    const name = s.next_reminder_name ? ` (${s.next_reminder_name})` : '';
-    countdownLbl.textContent = `Next reminder${name} in  ${fmt(s.remaining_reminder_secs || 0)}`;
+    const name = nextName ? ` (${nextName})` : '';
+    countdownLbl.textContent =
+      nextSecs > 0 || nextName
+        ? `Next reminder${name} in ${fmt(nextSecs)}`
+        : 'No upcoming reminders';
     resumeBtn.disabled = true;
   }
 
-  // Rebuild the list only when reminder data changes — not every 1s countdown tick.
-  const listKey = JSON.stringify(
-    reminders.map((r) => [r.id, r.enabled, r.name, r.scheduleSummary, r.nextFire, r.character, r.action]),
+    const listKey = JSON.stringify(
+    reminders.map((r) => [
+      r.id,
+      r.enabled,
+      r.name,
+      r.scheduleSummary ?? r.schedule_summary,
+      r.character,
+      r.action,
+      isPaused,
+    ]),
   );
   if (!formOpen && listKey !== lastListKey) {
     lastListKey = listKey;
     renderList();
+  } else if (!formOpen) {
+    updateLiveTimers();
   }
+}
+
+function updateLiveTimers() {
+  for (const r of reminders) {
+    const el = reminderList.querySelector(`[data-timer="${r.id}"]`);
+    if (!el) continue;
+    const { text, cls } = timerLabel(r);
+    el.textContent = text;
+    el.className = `reminder-timer${cls ? ` ${cls}` : ''}`;
+  }
+  reminderList.querySelectorAll('.reminder-item').forEach((item) => {
+    item.classList.toggle('active-fire', item.dataset.id === activeReminderId);
+  });
 }
 
 function characterLabel(id) {
@@ -127,28 +191,61 @@ function renderList() {
     reminderList.innerHTML = '<div class="hint">No reminders yet. Click + Add.</div>';
     return;
   }
+
   for (const r of reminders) {
-    const card = document.createElement('div');
-    card.className = 'reminder-card';
-    card.innerHTML = `
-      <div class="reminder-top">
+    const item = document.createElement('div');
+    item.className = 'reminder-item' + (openIds.has(r.id) ? ' open' : '');
+    if (r.id === activeReminderId) item.classList.add('active-fire');
+    item.dataset.id = r.id;
+
+    const { text, cls } = timerLabel(r);
+    const thumb = (catalog.characters || []).find((c) => c.id === r.character)?.thumb;
+
+    item.innerHTML = `
+      <button type="button" class="reminder-summary" data-toggle="${r.id}" aria-expanded="${openIds.has(r.id)}">
         <div>
-          <div class="reminder-name">${escapeHtml(r.name)}</div>
-          <div class="reminder-meta">${escapeHtml(r.scheduleSummary || '')}
- · ${escapeHtml(characterLabel(r.character))}/${escapeHtml(r.action)}</div>
-          <div class="reminder-next">${r.enabled ? (r.nextFire ? `Next: ${escapeHtml(r.nextFire)}` : 'No upcoming fire') : 'Disabled'}</div>
+          <div class="reminder-title">${escapeHtml(r.name)}</div>
+          <div class="reminder-sub">${escapeHtml(characterLabel(r.character))} · ${escapeHtml(r.action)}</div>
         </div>
-        <label class="toggle"><input type="checkbox" data-enable="${r.id}" ${r.enabled ? 'checked' : ''}/> On</label>
-      </div>
-      <div class="row wrap">
-        <button class="btn btn-secondary" data-edit="${r.id}">Edit</button>
-        <button class="btn btn-ghost" data-test="${r.id}">Test</button>
-        <button class="btn btn-danger" data-del="${r.id}">Delete</button>
+        <div class="reminder-timer${cls ? ` ${cls}` : ''}" data-timer="${r.id}">${text}</div>
+        <svg class="chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+          <path d="M5 8l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+      <div class="reminder-panel">
+        <div class="reminder-panel-meta">
+          ${thumb ? `<img src="../assets/characters/${escapeHtml(thumb)}" alt="" style="width:36px;height:36px;border-radius:10px;object-fit:cover;vertical-align:middle;margin-right:8px"/>` : ''}
+          ${escapeHtml(r.scheduleSummary || r.schedule_summary || '')}
+          ${
+            (r.nextFire || r.next_fire)
+              ? ` · Next at ${escapeHtml(r.nextFire || r.next_fire)}`
+              : isPaused && remainingOf(r) != null
+                ? ` · Frozen at ${fmt(remainingOf(r))}`
+                : ''
+          }
+        </div>
+        <div class="reminder-actions">
+          <button class="btn btn-secondary btn-sm" data-edit="${r.id}">Edit</button>
+          <button class="btn btn-ghost btn-sm" data-test="${r.id}">Test</button>
+          <button class="btn btn-danger btn-sm" data-del="${r.id}">Delete</button>
+          <label class="toggle"><input type="checkbox" data-enable="${r.id}" ${r.enabled ? 'checked' : ''}/> On</label>
+        </div>
       </div>
     `;
-    reminderList.appendChild(card);
+    reminderList.appendChild(item);
   }
 
+  reminderList.querySelectorAll('[data-toggle]').forEach((b) => {
+    b.addEventListener('click', () => {
+      const id = b.dataset.toggle;
+      const item = reminderList.querySelector(`.reminder-item[data-id="${id}"]`);
+      if (!item) return;
+      const open = item.classList.toggle('open');
+      b.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) openIds.add(id);
+      else openIds.delete(id);
+    });
+  });
   reminderList.querySelectorAll('[data-edit]').forEach((b) => {
     b.addEventListener('click', () => {
       const r = reminders.find((x) => x.id === b.dataset.edit);
@@ -372,7 +469,6 @@ async function saveEditor() {
     notYetMessage: document.getElementById('edit-not-yet').value.trim() || 'Do it now!',
     schedule: buildSchedule(),
   };
-  // Existing reminder: preserve enabled flag
   const existing = reminders.find((r) => r.id === reminder.id);
   if (existing) reminder.enabled = existing.enabled;
 
@@ -386,9 +482,14 @@ async function saveEditor() {
 }
 
 function fmt(totalSecs) {
-  const s = Math.max(0, Math.round(totalSecs));
+  const s = Math.max(0, Math.round(Number(totalSecs) || 0));
   const m = Math.floor(s / 60);
   const sec = s % 60;
+  if (m >= 60) {
+    const h = Math.floor(m / 60);
+    const mm = m % 60;
+    return `${h}:${String(mm).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  }
   return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
 }
 

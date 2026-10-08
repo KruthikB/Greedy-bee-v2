@@ -22,7 +22,11 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         if !scale.is_finite() || scale < 0.5 {
             scale = 1.0;
         }
-        let overlay_physical_h = 370u32; // 300 video + 70 button strip
+        // Logical CSS height for the overlay chrome. Must match overlay.css
+        // (video + button strip). Converting a "physical" constant by /scale
+        // made the WebView shorter than the CSS on HiDPI and cropped heads.
+        let overlay_logical_h = 580.0;
+        let overlay_physical_h = (overlay_logical_h * scale).round() as i32;
 
         let window = WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App("overlay/index.html".into()))
             .title("")
@@ -35,9 +39,9 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
             .drag_and_drop(false)
             .position(
                 work_x as f64 / scale,
-                (work_y + work_h as i32 - overlay_physical_h as i32) as f64 / scale,
+                (work_y + work_h as i32 - overlay_physical_h) as f64 / scale,
             )
-            .inner_size(work_w as f64 / scale, overlay_physical_h as f64 / scale)
+            .inner_size(work_w as f64 / scale, overlay_logical_h)
             .build()?;
 
         // Click-through until the reminder UI asks for buttons.

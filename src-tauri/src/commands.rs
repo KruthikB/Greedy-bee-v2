@@ -28,18 +28,34 @@ pub struct StatusPayload {
     pub remaining_pause_secs: i64,
     pub remaining_reminder_secs: u64,
     pub next_reminder_name: Option<String>,
+    pub active_reminder_id: Option<String>,
     pub reminders: Vec<ReminderStatus>,
 }
 
-fn reminder_status(rt: &scheduler::ReminderRuntime) -> ReminderStatus {
+fn reminder_status(rt: &scheduler::ReminderRuntime, is_paused: bool) -> ReminderStatus {
     let now = chrono::Local::now();
-    let remaining_secs = rt.next_fire.and_then(|nf| {
-        if nf > now {
-            Some((nf - now).num_seconds().max(0) as u64)
-        } else {
-            Some(0)
-        }
-    });
+    // While paused, report the frozen snapshot so countdowns do not keep ticking.
+    let remaining_secs = if is_paused {
+        rt.paused_remaining
+            .map(|d| d.num_seconds().max(0) as u64)
+            .or_else(|| {
+                rt.next_fire.map(|nf| {
+                    if nf > now {
+                        (nf - now).num_seconds().max(0) as u64
+                    } else {
+                        0
+                    }
+                })
+            })
+    } else {
+        rt.next_fire.map(|nf| {
+            if nf > now {
+                (nf - now).num_seconds().max(0) as u64
+            } else {
+                0
+            }
+        })
+    };
     ReminderStatus {
         id: rt.reminder.id.clone(),
         name: rt.reminder.name.clone(),
@@ -60,19 +76,29 @@ fn reminder_status(rt: &scheduler::ReminderRuntime) -> ReminderStatus {
 pub fn get_status(state: State<'_, AppState>) -> StatusPayload {
     let s = state.scheduler.lock().unwrap();
     let next = s.next_upcoming();
+    let is_paused = s.is_paused;
     StatusPayload {
-        is_paused: s.is_paused,
+        is_paused,
         remaining_pause_secs: s.remaining_pause_secs(),
         remaining_reminder_secs: s.remaining_until_next_secs(),
         next_reminder_name: next.map(|(n, _)| n),
-        reminders: s.reminders.iter().map(reminder_status).collect(),
+        active_reminder_id: s.active_id.clone(),
+        reminders: s
+            .reminders
+            .iter()
+            .map(|r| reminder_status(r, is_paused))
+            .collect(),
     }
 }
 
 #[tauri::command]
 pub fn list_reminders(state: State<'_, AppState>) -> Vec<ReminderStatus> {
     let s = state.scheduler.lock().unwrap();
-    s.reminders.iter().map(reminder_status).collect()
+    let is_paused = s.is_paused;
+    s.reminders
+        .iter()
+        .map(|r| reminder_status(r, is_paused))
+        .collect()
 }
 
 #[tauri::command]
@@ -108,6 +134,7 @@ pub fn save_reminder(
     let runtime = scheduler::ReminderRuntime {
         reminder: reminder.clone(),
         next_fire,
+        paused_remaining: None,
     };
 
     if let Some(i) = idx {
@@ -116,7 +143,7 @@ pub fn save_reminder(
         s.reminders.push(runtime);
     }
 
-    let status = reminder_status(s.find(&reminder.id).unwrap());
+    let status = reminder_status(s.find(&reminder.id).unwrap(), s.is_paused);
     let cfg = s.to_config();
     drop(s);
     config::save(&app, &cfg);
@@ -243,6 +270,7 @@ pub fn set_interval(minutes: u32, state: State<'_, AppState>, app: AppHandle) {
         s.reminders.push(scheduler::ReminderRuntime {
             reminder: r,
             next_fire: next,
+            paused_remaining: None,
         });
     }
     let cfg = s.to_config();

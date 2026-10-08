@@ -19,6 +19,8 @@ pub struct SchedulerState {
 pub struct ReminderRuntime {
     pub reminder: Reminder,
     pub next_fire: Option<DateTime<Local>>,
+    /// Remaining time until next_fire when a pause began (preserves countdowns).
+    pub paused_remaining: Option<ChronoDuration>,
 }
 
 impl SchedulerState {
@@ -36,6 +38,7 @@ impl SchedulerState {
                 ReminderRuntime {
                     reminder: r.clone(),
                     next_fire,
+                    paused_remaining: None,
                 }
             })
             .collect();
@@ -67,10 +70,15 @@ impl SchedulerState {
     }
 
     pub fn next_upcoming(&self) -> Option<(String, DateTime<Local>)> {
+        let now = Local::now();
         self.reminders
             .iter()
             .filter(|r| r.reminder.enabled)
+            // Skip the reminder currently on screen (next_fire may be cleared).
+            .filter(|r| self.active_id.as_deref() != Some(r.reminder.id.as_str()))
             .filter_map(|r| r.next_fire.map(|t| (r.reminder.name.clone(), t)))
+            // Only future fires count toward the countdown (past = due/queued).
+            .filter(|(_, t)| *t > now)
             .min_by_key(|(_, t)| *t)
     }
 
@@ -78,15 +86,19 @@ impl SchedulerState {
         if self.is_paused {
             return 0;
         }
+        if self.active_id.is_some() {
+            // Overlay is showing — don't report a bogus 0:00 from a due sibling.
+            if let Some((_, next)) = self.next_upcoming() {
+                let now = Local::now();
+                return (next - now).num_seconds().max(0) as u64;
+            }
+            return 0;
+        }
         let Some((_, next)) = self.next_upcoming() else {
             return 0;
         };
         let now = Local::now();
-        if next > now {
-            (next - now).num_seconds().max(0) as u64
-        } else {
-            0
-        }
+        (next - now).num_seconds().max(0) as u64
     }
 
     pub fn replace_reminders(&mut self, reminders: Vec<Reminder>) {
@@ -102,6 +114,7 @@ impl SchedulerState {
                 ReminderRuntime {
                     reminder: r,
                     next_fire,
+                    paused_remaining: None,
                 }
             })
             .collect();
@@ -124,6 +137,7 @@ impl SchedulerState {
 }
 
 #[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct PauseChangedPayload {
     pub is_paused: bool,
     pub remaining_secs: i64,
@@ -177,8 +191,9 @@ pub async fn run_loop(state: Arc<Mutex<SchedulerState>>, app: AppHandle) {
                         // while waiting for the overlay. Interval waits until dismiss.
                         match &rt.reminder.schedule {
                             Schedule::Interval { .. } => {
-                                // Keep next_fire in the past until dismissed; mark with None
-                                // temporarily by setting far future after enqueue below.
+                                // Clear until dismiss so we don't re-queue every second
+                                // and don't poison the global countdown with a fake far date.
+                                rt.next_fire = None;
                             }
                             Schedule::Once { .. } => {
                                 rt.next_fire = None;
@@ -192,12 +207,6 @@ pub async fn run_loop(state: Arc<Mutex<SchedulerState>>, app: AppHandle) {
             }
 
             for id in &due_ids {
-                if let Some(rt) = s.find_mut(id) {
-                    if matches!(rt.reminder.schedule, Schedule::Interval { .. }) {
-                        // Park until dismiss so we don't re-fire every second.
-                        rt.next_fire = Some(now + ChronoDuration::days(3650));
-                    }
-                }
                 if !s.queue.contains(id) && s.active_id.as_deref() != Some(id.as_str()) {
                     s.queue.push_back(id.clone());
                 }
@@ -243,10 +252,20 @@ fn reschedule_all_after_resume(s: &mut SchedulerState) {
     for rt in s.reminders.iter_mut() {
         if !rt.reminder.enabled {
             rt.next_fire = None;
+            rt.paused_remaining = None;
             continue;
         }
-        // Missed once/daily/weekly → next occurrence; interval → restart countdown.
-        rt.next_fire = config::next_fire(&rt.reminder.schedule, now);
+        if let Some(rem) = rt.paused_remaining.take() {
+            // Preserve the same time-to-fire that remained when pause began.
+            rt.next_fire = Some(now + rem);
+        } else if rt.next_fire.is_none()
+            && s.active_id.as_deref() != Some(rt.reminder.id.as_str())
+            && !s.queue.contains(&rt.reminder.id)
+        {
+            // No snapshot (e.g. was mid-overlay) — schedule a fresh next occurrence.
+            rt.next_fire = config::next_fire(&rt.reminder.schedule, now);
+        }
+        // If still active/queued with next_fire None, leave it for dismiss handling.
     }
 }
 
@@ -349,6 +368,22 @@ fn try_fire_next(state: &Arc<Mutex<SchedulerState>>, app: &AppHandle) {
 
 pub fn pause(state: &Arc<Mutex<SchedulerState>>, duration_mins: Option<u32>, app: &AppHandle) {
     let mut s = state.lock().unwrap();
+    let now = Local::now();
+    for rt in s.reminders.iter_mut() {
+        if let Some(nf) = rt.next_fire {
+            let rem = nf - now;
+            rt.paused_remaining = Some(if rem > ChronoDuration::zero() {
+                rem
+            } else {
+                ChronoDuration::zero()
+            });
+            // Clear absolute fire time while paused; resume rebuilds from snapshot.
+            rt.next_fire = None;
+        } else {
+            // Mid-overlay / queued: keep no snapshot; dismiss will reschedule.
+            rt.paused_remaining = None;
+        }
+    }
     s.is_paused = true;
     s.pause_until = duration_mins.map(|m| Instant::now() + Duration::from_secs(m as u64 * 60));
     let remaining = s.remaining_pause_secs();

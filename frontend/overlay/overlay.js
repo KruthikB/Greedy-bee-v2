@@ -224,8 +224,10 @@ function playVideoPack(pack, opts = {}) {
     const H = first.naturalHeight;
     canvas.width = W;
     canvas.height = H;
-    canvas.style.width = `${W}px`;
-    canvas.style.height = `${H}px`;
+    // Fill the video slot; CSS max-height:100% keeps the full frame (no head crop).
+    canvas.style.width = 'auto';
+    canvas.style.height = '100%';
+    canvas.style.maxHeight = '100%';
     const frameMs = Math.max(16, Math.round(1000 / pack.fps));
     const textStart = boardRect && boardText
       ? Math.max(0, Math.floor(count * 0.75))
