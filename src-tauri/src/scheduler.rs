@@ -4,16 +4,22 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::config::{self, Config, Reminder, Schedule};
+use crate::config::{
+    self, Config, PausedReminderRemaining, PersistedPause, Reminder, Schedule,
+};
 
 pub struct SchedulerState {
     pub reminders: Vec<ReminderRuntime>,
     pub is_paused: bool,
     pub pause_until: Option<Instant>,
+    /// Wall-clock end of a timed pause (persisted across quit).
+    pub pause_until_dt: Option<DateTime<Local>>,
     pub queue: VecDeque<String>,
     pub active_id: Option<String>,
     /// When the current overlay fire started (for stuck-active recovery).
     pub active_since: Option<Instant>,
+    /// True when the active overlay was started via Test (must not reschedule).
+    pub active_is_test: bool,
     /// Character display height percent (aspect ratio preserved).
     pub character_size: u32,
 }
@@ -28,7 +34,7 @@ pub struct ReminderRuntime {
 impl SchedulerState {
     pub fn from_config(cfg: &Config) -> Self {
         let now = Local::now();
-        let reminders = cfg
+        let mut reminders: Vec<ReminderRuntime> = cfg
             .reminders
             .iter()
             .map(|r| {
@@ -44,13 +50,62 @@ impl SchedulerState {
                 }
             })
             .collect();
+
+        let mut is_paused = false;
+        let mut pause_until: Option<Instant> = None;
+        let mut pause_until_dt: Option<DateTime<Local>> = None;
+
+        if let Some(pause) = &cfg.pause {
+            // Restore frozen remaining deltas for each reminder.
+            for entry in &pause.remaining {
+                if let Some(rt) = reminders.iter_mut().find(|r| r.reminder.id == entry.id) {
+                    rt.paused_remaining =
+                        Some(ChronoDuration::seconds(entry.remaining_secs.max(0)));
+                    rt.next_fire = None;
+                }
+            }
+
+            let until_dt = pause
+                .pause_until
+                .as_ref()
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                .map(|dt| dt.with_timezone(&Local));
+
+            match until_dt {
+                Some(dt) if dt <= now => {
+                    // Timed pause already expired while the app was closed — resume
+                    // with the same remaining deltas that were frozen at pause.
+                    for rt in reminders.iter_mut() {
+                        if let Some(rem) = rt.paused_remaining.take() {
+                            rt.next_fire = Some(now + rem);
+                        } else if rt.reminder.enabled {
+                            rt.next_fire = config::next_fire(&rt.reminder.schedule, now);
+                        }
+                    }
+                    is_paused = false;
+                    pause_until = None;
+                    pause_until_dt = None;
+                }
+                other => {
+                    is_paused = true;
+                    pause_until_dt = other;
+                    pause_until = other.map(|dt| {
+                        let secs = (dt - now).num_seconds().max(0) as u64;
+                        Instant::now() + Duration::from_secs(secs)
+                    });
+                }
+            }
+        }
+
         Self {
             reminders,
-            is_paused: false,
-            pause_until: None,
+            is_paused,
+            pause_until,
+            pause_until_dt,
             queue: VecDeque::new(),
             active_id: None,
             active_since: None,
+            active_is_test: false,
             character_size: config::clamp_character_size(cfg.character_size),
         }
     }
@@ -124,10 +179,30 @@ impl SchedulerState {
     }
 
     pub fn to_config(&self) -> Config {
+        let pause = if self.is_paused {
+            Some(PersistedPause {
+                pause_until: self
+                    .pause_until_dt
+                    .map(|dt| dt.to_rfc3339()),
+                remaining: self
+                    .reminders
+                    .iter()
+                    .filter_map(|rt| {
+                        rt.paused_remaining.map(|d| PausedReminderRemaining {
+                            id: rt.reminder.id.clone(),
+                            remaining_secs: d.num_seconds().max(0),
+                        })
+                    })
+                    .collect(),
+            })
+        } else {
+            None
+        };
         Config {
             version: 2,
             reminders: self.reminders.iter().map(|r| r.reminder.clone()).collect(),
             character_size: self.character_size,
+            pause,
         }
     }
 
@@ -186,12 +261,17 @@ pub async fn run_loop(state: Arc<Mutex<SchedulerState>>, app: AppHandle) {
                     if now_instant >= until {
                         s.is_paused = false;
                         s.pause_until = None;
+                        s.pause_until_dt = None;
                         reschedule_all_after_resume(&mut s);
+                        let cfg = s.to_config();
+                        drop(s);
+                        config::save(&app, &cfg);
                         let payload = PauseChangedPayload {
                             is_paused: false,
                             remaining_secs: 0,
                         };
                         let _ = app.emit("pause-changed", payload);
+                        continue;
                     }
                 }
                 continue;
@@ -247,6 +327,7 @@ pub async fn run_loop(state: Arc<Mutex<SchedulerState>>, app: AppHandle) {
                         let payload = fire_payload(rt, s.character_size);
                         s.active_id = Some(next_id);
                         s.active_since = Some(Instant::now());
+                        s.active_is_test = false;
                         drop(s);
                         fire_overlay(&app, payload);
                         continue;
@@ -322,12 +403,21 @@ pub fn fire_overlay(app: &AppHandle, payload: ReminderFirePayload) {
 
 pub fn on_dismiss(state: &Arc<Mutex<SchedulerState>>, id: &str, app: &AppHandle) {
     let mut s = state.lock().unwrap();
+    let was_test = s.active_is_test && s.active_id.as_deref() == Some(id);
     if s.active_id.as_deref() == Some(id) {
         s.active_id = None;
         s.active_since = None;
+        s.active_is_test = false;
     }
     // Remove from queue if still present
     s.queue.retain(|q| q != id);
+
+    // Test overlays must not touch schedule timers.
+    if was_test {
+        drop(s);
+        try_fire_next(state, app);
+        return;
+    }
 
     if let Some(rt) = s.find_mut(id) {
         match &rt.reminder.schedule {
@@ -340,7 +430,6 @@ pub fn on_dismiss(state: &Arc<Mutex<SchedulerState>>, id: &str, app: &AppHandle)
                 let cfg = s.to_config();
                 drop(s);
                 config::save(app, &cfg);
-                // Try to show next queued
                 try_fire_next(&Arc::clone(state), app);
                 return;
             }
@@ -363,6 +452,7 @@ fn try_fire_next(state: &Arc<Mutex<SchedulerState>>, app: &AppHandle) {
             let payload = fire_payload(rt, s.character_size);
             s.active_id = Some(next_id);
             s.active_since = Some(Instant::now());
+            s.active_is_test = false;
             drop(s);
             fire_overlay(app, payload);
         }
@@ -388,9 +478,21 @@ pub fn pause(state: &Arc<Mutex<SchedulerState>>, duration_mins: Option<u32>, app
         }
     }
     s.is_paused = true;
-    s.pause_until = duration_mins.map(|m| Instant::now() + Duration::from_secs(m as u64 * 60));
+    match duration_mins {
+        Some(m) if m > 0 => {
+            let secs = m as u64 * 60;
+            s.pause_until = Some(Instant::now() + Duration::from_secs(secs));
+            s.pause_until_dt = Some(now + ChronoDuration::seconds(secs as i64));
+        }
+        _ => {
+            s.pause_until = None;
+            s.pause_until_dt = None;
+        }
+    }
     let remaining = s.remaining_pause_secs();
+    let cfg = s.to_config();
     drop(s);
+    config::save(app, &cfg);
     let _ = app.emit(
         "pause-changed",
         PauseChangedPayload {
@@ -404,8 +506,11 @@ pub fn resume(state: &Arc<Mutex<SchedulerState>>, app: &AppHandle) {
     let mut s = state.lock().unwrap();
     s.is_paused = false;
     s.pause_until = None;
+    s.pause_until_dt = None;
     reschedule_all_after_resume(&mut s);
+    let cfg = s.to_config();
     drop(s);
+    config::save(app, &cfg);
     let _ = app.emit(
         "pause-changed",
         PauseChangedPayload {
@@ -439,10 +544,10 @@ pub fn test_reminder(state: &Arc<Mutex<SchedulerState>>, id: Option<&str>, app: 
         return;
     };
     if s.active_id.is_some() {
-        // Another character is on screen — wait until it is acknowledged.
-        if !s.queue.contains(&reminder.id) {
-            s.queue.push_back(reminder.id.clone());
-        }
+        // Do not queue a test as a real reminder — that would steal the schedule.
+        return;
+    }
+    if s.is_paused {
         return;
     }
     let size = s.character_size;
@@ -455,8 +560,10 @@ pub fn test_reminder(state: &Arc<Mutex<SchedulerState>>, id: Option<&str>, app: 
         not_yet_message: reminder.not_yet_message.clone(),
         character_size: size,
     };
+    // Leave next_fire untouched so Test never resets timers.
     s.active_id = Some(reminder.id);
     s.active_since = Some(Instant::now());
+    s.active_is_test = true;
     drop(s);
     fire_overlay(app, payload);
 }

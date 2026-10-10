@@ -276,7 +276,7 @@ pub fn set_overlay_clickthrough(enabled: bool, app: AppHandle) {
 
 #[tauri::command]
 pub fn quit_app(app: AppHandle) {
-    app.exit(0);
+    crate::quit_fully(&app);
 }
 
 /// Kept for older settings UI during migration; creates/updates the first interval reminder.

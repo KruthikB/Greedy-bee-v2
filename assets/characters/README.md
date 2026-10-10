@@ -6,7 +6,7 @@ Shipped packs:
 
 | Id | Display name | Actions |
 |----|--------------|---------|
-| `water-guy` | Kaybie | `drink`, `board` |
+| `water-guy` | Kaybie | `drink`, `board` (board clip must be Kaybie’s own — never a copy of Heysi’s) |
 | `Heysi` | Heysi | `drink`, `board` |
 
 ## Chroma key green

@@ -80,7 +80,7 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
         "pause_indef" => scheduler::pause(&state.scheduler, None, app),
         "resume" => scheduler::resume(&state.scheduler, app),
         "test" => scheduler::test_reminder(&state.scheduler, None, app),
-        "quit" => app.exit(0),
+        "quit" => crate::quit_fully(app),
         _ => {}
     }
 }
