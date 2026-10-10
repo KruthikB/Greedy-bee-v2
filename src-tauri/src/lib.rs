@@ -20,14 +20,25 @@ pub fn run() {
         .on_window_event(|window, event| {
             if window.label() == "settings" {
                 if let WindowEvent::CloseRequested { api, .. } = event {
+                    // Closing Settings fully quits — no tray-background scheduling.
                     api.prevent_close();
-                    let _ = window.hide();
+                    quit_fully(window.app_handle());
                 }
             }
         })
         .setup(|app| {
             let cfg = config::load(app.handle());
             let scheduler_state = Arc::new(Mutex::new(scheduler::SchedulerState::from_config(&cfg)));
+
+            // If a timed pause expired while the app was closed, persist the resumed state.
+            {
+                let s = scheduler_state.lock().unwrap();
+                if cfg.pause.is_some() && !s.is_paused {
+                    let cleaned = s.to_config();
+                    drop(s);
+                    config::save(app.handle(), &cleaned);
+                }
+            }
 
             app.manage(AppState {
                 scheduler: scheduler_state.clone(),
@@ -117,4 +128,17 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             platform::show_error(&format!("Greedy Bee failed to start:\n{err}"));
         });
+}
+
+/// Persist pause state, tear down overlay, and exit the process completely.
+pub fn quit_fully(app: &tauri::AppHandle) {
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Ok(s) = state.scheduler.lock() {
+            let cfg = s.to_config();
+            drop(s);
+            config::save(app, &cfg);
+        }
+    }
+    crate::overlay_window::destroy(app);
+    app.exit(0);
 }

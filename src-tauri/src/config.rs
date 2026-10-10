@@ -28,6 +28,27 @@ pub struct Config {
     /// Aspect ratio is always preserved.
     #[serde(default = "default_character_size")]
     pub character_size: u32,
+    /// Persisted pause snapshot so timers survive a full quit/relaunch.
+    #[serde(default)]
+    pub pause: Option<PersistedPause>,
+}
+
+/// Frozen countdown state while reminders are paused.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersistedPause {
+    /// Absolute local time when a timed pause ends. `None` = paused indefinitely.
+    pub pause_until: Option<String>,
+    /// Remaining seconds until each reminder's next fire (frozen at pause).
+    #[serde(default)]
+    pub remaining: Vec<PausedReminderRemaining>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PausedReminderRemaining {
+    pub id: String,
+    pub remaining_secs: i64,
 }
 
 fn default_version() -> u32 {
@@ -83,8 +104,10 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             version: 2,
-            reminders: vec![default_water_reminder(15)],
+            // Empty by default — never auto-recreate a drink reminder after the user deletes all.
+            reminders: vec![],
             character_size: default_character_size(),
+            pause: None,
         }
     }
 }
@@ -118,10 +141,9 @@ pub fn load(app: &tauri::AppHandle) -> Config {
         return Config::default();
     };
 
+    // Accept empty reminder lists — deleting all reminders must stick.
     if let Ok(cfg) = serde_json::from_str::<Config>(&raw) {
-        if !cfg.reminders.is_empty() {
-            return cfg;
-        }
+        return cfg;
     }
 
     // Migrate legacy single-interval config.
@@ -130,6 +152,7 @@ pub fn load(app: &tauri::AppHandle) -> Config {
             version: 2,
             reminders: vec![default_water_reminder(legacy.reminder_interval_minutes)],
             character_size: default_character_size(),
+            pause: None,
         };
         save(app, &cfg);
         return cfg;

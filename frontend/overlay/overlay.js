@@ -88,34 +88,10 @@ async function loadVideoFrames(character, action) {
   if (videoCache.has(key)) return videoCache.get(key);
 
   const base = `../assets/characters/${character}/${action}`;
-  let manifest;
-  try {
-    manifest = await fetch(`${base}/manifest.json`).then((r) => {
-      if (!r.ok) throw new Error(`manifest ${r.status}`);
-      return r.json();
-    });
-  } catch (_) {
-    manifest = await fetch('../assets/frames/manifest.json').then((r) => r.json());
-    const count = Number(manifest.frameCount) || 0;
-    const frames = new Array(count);
-    const prefetch = Math.min(8, count);
-    await Promise.all(
-      Array.from({ length: prefetch }, async (_, i) => {
-        const n = String(i + 1).padStart(4, '0');
-        frames[i] = await loadOneFrame(`../assets/frames/frame_${n}.webp`);
-      }),
-    );
-    const pack = {
-      frames,
-      fps: Number(manifest.fps) || 12,
-      boardRect: null,
-      base: '../assets/frames',
-      count,
-    };
-    videoCache.set(key, pack);
-    void fillRemainingFrames(pack);
-    return pack;
-  }
+  const manifest = await fetch(`${base}/manifest.json`).then((r) => {
+    if (!r.ok) throw new Error(`manifest ${r.status} for ${key}`);
+    return r.json();
+  });
 
   const fps = Number(manifest.fps) || 12;
   const count = Number(manifest.frameCount) || 0;
@@ -388,10 +364,19 @@ async function showReminder(payload) {
         });
       }
     } else {
-      const pack = await loadVideoFrames(activeReminder.character, activeReminder.action);
+      let action = activeReminder.action;
+      let pack;
+      try {
+        pack = await loadVideoFrames(activeReminder.character, action);
+      } catch (err) {
+        // Missing action pack (e.g. Kaybie has no distinct board clip yet).
+        console.warn(`pack ${activeReminder.character}/${action} missing, falling back to drink`, err);
+        action = 'drink';
+        pack = await loadVideoFrames(activeReminder.character, action);
+      }
       await playVideoPack(pack, {
-        boardRect: pack.boardRect,
-        boardText: activeReminder.action === 'board' ? activeReminder.boardText : '',
+        boardRect: action === 'board' ? pack.boardRect : null,
+        boardText: action === 'board' ? activeReminder.boardText : '',
       });
     }
   } catch (err) {
